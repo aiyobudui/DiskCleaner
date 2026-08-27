@@ -1,4 +1,4 @@
-using DiskCleaner.Interop;
+﻿using DiskCleaner.Interop;
 using DiskCleaner.Models;
 using Microsoft.Win32;
 using System;
@@ -16,27 +16,27 @@ using System.Windows.Media;
 
 namespace DiskCleaner.ViewModels
 {
-    /// <summary>
-    /// 右键管理标签页：文件右键、桌面右键、新建菜单。
-    /// 仅读取 HKCR 中安全的右键菜单位置，提供启用/禁用切换。
-    /// </summary>
+    
+    
+    
+    
     public partial class MainViewModel : ViewModelBase
     {
-        // ---------- 集合 ----------
+        
         private ObservableCollection<ContextMenuItem> _fileContextMenuItems = new();
         private ObservableCollection<ContextMenuItem> _desktopContextMenuItems = new();
         private ObservableCollection<ContextMenuItem> _newMenuItems = new();
 
-        /// <summary>右键项删除前导出的注册表备份目录。</summary>
+        
         private static readonly string _contextMenuBackupDir =
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DiskCleaner", "ContextMenuBackups");
 
-        // ---------- 状态 ----------
+        
         private bool _isContextMenuScanning;
         private string _contextMenuStatusText = "点击刷新扫描右键菜单";
         private int _selectedContextMenuTabIndex;
 
-        // ---------- 属性 ----------
+        
         public ObservableCollection<ContextMenuItem> FileContextMenuItems
         {
             get => _fileContextMenuItems;
@@ -78,10 +78,10 @@ namespace DiskCleaner.ViewModels
         }
 
         private bool _showSystemItems;
-        /// <summary>
-        /// true = 显示系统项（不过滤）；false = 不显示系统项（过滤）。
-        /// 默认 false（不显示系统项），与 UI 开关的 IsChecked 直接绑定。
-        /// </summary>
+        
+        
+        
+        
         public bool ShowSystemItems
         {
             get => _showSystemItems;
@@ -95,40 +95,40 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        // ---------- 命令 ----------
+        
         public ICommand ScanContextMenuCommand { get; private set; }
 
-        /// <summary>永久删除某个右键菜单项（删除前自动备份，可撤销）。</summary>
+        
         public ICommand DeleteContextMenuItemCommand { get; private set; }
 
-        /// <summary>恢复某个已删除的右键菜单项（重新导入备份并刷新列表）。</summary>
+        
         public ICommand RestoreContextMenuItemCommand { get; private set; }
 
-        /// <summary>重启 Windows 资源管理器（修改右键菜单/Shell 扩展后使其生效）。</summary>
+        
         public ICommand RestartExplorerCommand { get; private set; }
 
-        // ---------- 加载 ----------
+        
         [Conditional("DEBUG")]
         private static void DebugLog(string message)
         {
-            // 仅 Debug 构建保留调用；Release 构建编译期剔除，避免热路径上的字符串格式化开销
+            
         }
 
-        /// <summary>
-        /// 枚举所有需要扫描"文件右键"的类键（相对 HKCR 路径 + 显示用 Scope 名称）。
-        /// 三层覆盖，确保不遗漏注册在特定扩展名或其 ProgID 子键下的右键菜单：
-        ///   ① 通用类键（*/Directory/Folder/Drive/AllFilesystemObjects，来自 ContextMenuMapping）；
-        ///   ② 所有扩展名键（.docx/.xlsx 等本身）；
-        ///   ③ 扩展名键下的 ProgID 子键（如 .docx\Word.Document.12，嵌套向下一层）。
-        /// 桌面背景类键（DesktopBackground/Directory\Background）不在此枚举，单独处理。
-        /// </summary>
+        
+        
+        
+        
+        
+        
+        
+        
         private static IEnumerable<(string ClassPath, string Scope)> EnumerateFileRightClickRegistryClasses()
         {
-            // ① 通用类键（来自 ContextMenuMapping 统一配置，避免重复定义）
+            
             foreach (var (c, s) in ContextMenuMapping.GenericFileRightClickClasses)
                 yield return (c, s);
 
-            // ②③ 扩展名键及其 ProgID 子键（嵌套向下向下）
+            
             string[] extNames;
             try { extNames = Registry.ClassesRoot.GetSubKeyNames(); }
             catch { yield break; }
@@ -139,8 +139,8 @@ namespace DiskCleaner.ViewModels
                 string ext = name;
                 yield return (ext, $"扩展名 {ext}");
 
-                // 嵌套向下：扩展名 -> ProgID 子键
-                // yield 不能出现在带 catch 的 try 中，故先收集再 yield
+                
+                
                 var progIdPaths = new List<string>();
                 try
                 {
@@ -176,13 +176,13 @@ namespace DiskCleaner.ViewModels
                     var newList = new List<ContextMenuItem>();
                     var diags = new StringBuilder();
 
-                    // ── 诊断计数结构 ──
+                    
                     int verbsScanned = 0, verbsFiltered = 0, verbsAdded = 0, verbsErrored = 0;
                     int extsScanned = 0, extsFiltered = 0, extsAdded = 0, extsErrored = 0;
                     int newScanned = 0, newFiltered = 0, newAdded = 0, newErrored = 0;
                     var firstErrors = new List<string>();
 
-                    // 文件右键：动词 + 普通 Shell 扩展 → 三层枚举（通用类键 + 扩展名键 + ProgID 子键）
+                    
                     foreach (var (cls, scope) in EnumerateFileRightClickRegistryClasses())
                     {
                         ScanShellVerbs(cls, ContextMenuCategory.File, scope, fileList,
@@ -191,23 +191,23 @@ namespace DiskCleaner.ViewModels
                             ref extsScanned, ref extsFiltered, ref extsAdded, ref extsErrored, firstErrors);
                     }
 
-                    // 拖拽右键（DragDropHandlers）→ 仅通用类键扫一次即可，无需枚举每个扩展名（避免性能浪费）
+                    
                     foreach (var (cls, scope) in ContextMenuMapping.GenericFileRightClickClasses)
                     {
-                        // DragDropHandlers 只对 文件/文件夹 类型有意义，跳过 Drive/AllFilesystemObjects
+                        
                         if (cls == @"Drive" || cls == @"AllFilesystemObjects") continue;
                         ScanShellExtensions(cls, ContextMenuCategory.File, scope, fileList,
                             ref extsScanned, ref extsFiltered, ref extsAdded, ref extsErrored, firstErrors, "DragDropHandlers");
                     }
 
-                    // WOW6432Node 32位兼容分支 → 仅通用类键扫一次即可（32位扩展极少注册在特定扩展名）
+                    
                     foreach (var (cls, scope) in ContextMenuMapping.GenericFileRightClickClasses)
                     {
                         ScanShellExtensionsWOW6432(cls, ContextMenuCategory.File, scope, fileList,
                             ref extsScanned, ref extsFiltered, ref extsAdded, ref extsErrored, firstErrors);
                     }
 
-                    // 桌面右键：桌面背景、文件夹背景（来自 ContextMenuMapping 共用清单）
+                    
                     foreach (var (cls, scope) in ContextMenuMapping.GenericDesktopRightClickClasses)
                     {
                         ScanShellVerbs(cls, ContextMenuCategory.Desktop, scope, desktopList,
@@ -216,28 +216,28 @@ namespace DiskCleaner.ViewModels
                             ref extsScanned, ref extsFiltered, ref extsAdded, ref extsErrored, firstErrors);
                     }
 
-                    // 桌面右键：DragDropHandlers（桌面也支持拖拽，某些程序会注册桌面级拖拽处理）
+                    
                     foreach (var (cls, scope) in ContextMenuMapping.GenericDesktopRightClickClasses)
                     {
                         ScanShellExtensions(cls, ContextMenuCategory.Desktop, scope, desktopList,
                             ref extsScanned, ref extsFiltered, ref extsAdded, ref extsErrored, firstErrors, "DragDropHandlers");
                     }
 
-                    // 桌面右键：WOW6432Node 32位兼容分支（很多桌面右键扩展如 NVIDIA/AMD 是 32 位的）
+                    
                     foreach (var (cls, scope) in ContextMenuMapping.GenericDesktopRightClickClasses)
                     {
                         ScanShellExtensionsWOW6432(cls, ContextMenuCategory.Desktop, scope, desktopList,
                             ref extsScanned, ref extsFiltered, ref extsAdded, ref extsErrored, firstErrors);
                     }
 
-                    // 桌面右键：PropertySheetHandlers（桌面背景右键"属性"扩展页，如显卡控制面板）
+                    
                     foreach (var (cls, scope) in ContextMenuMapping.GenericDesktopRightClickClasses)
                     {
                         ScanShellExtensions(cls, ContextMenuCategory.Desktop, scope, desktopList,
                             ref extsScanned, ref extsFiltered, ref extsAdded, ref extsErrored, firstErrors, "PropertySheetHandlers");
                     }
 
-                    // 新建菜单
+                    
                     ScanNewMenu(newList, ref newScanned, ref newFiltered, ref newAdded, ref newErrored, firstErrors);
 
                     SortByName(fileList);
@@ -269,8 +269,8 @@ namespace DiskCleaner.ViewModels
                     {
                         DebugLog("UI Thread dispatching");
 
-                        // 统计每个列表中，同名扩展是否同时存在 x64 和 x86 版本，
-                        // 只有同时存在时才显示位数后缀，避免单项污染。
+                        
+                        
                         MarkDuplicateBitness(fileList);
                         MarkDuplicateBitness(desktopList);
                         MarkDuplicateBitness(newList);
@@ -288,7 +288,7 @@ namespace DiskCleaner.ViewModels
 
                         DebugLog("Icons done");
 
-                        // 诊断信息附加到状态栏（简洁版）
+                        
                         var totalItems = FileContextMenuItems.Count + DesktopContextMenuItems.Count + NewMenuItems.Count;
                         ContextMenuStatusText = $"扫描完成：共 {totalItems} 项（文件 {FileContextMenuItems.Count}、桌面 {DesktopContextMenuItems.Count}、新建 {NewMenuItems.Count}）";
                         DebugLog($"StatusText: {ContextMenuStatusText}");
@@ -311,21 +311,21 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        // ---------- 扫描实现 ----------
+        
         private static void SortByName(List<ContextMenuItem> list)
             => list.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase));
 
-        /// <summary>
-        /// 对已排序的右键项列表去重合并：以 CLSID（Shell 扩展）或键名（Shell 动词）为唯一键，
-        /// 合并同一扩展在多个注册表分支注册的条目为一项，作用域合并为逗号分隔的描述，
-        /// 所有注册表路径保留在 AllRegistryEntries 中供统一切换/删除。
-        /// 不去除重复项，而是合并保留第一个并吸收后续的路径和作用域。
-        /// </summary>
+        
+        
+        
+        
+        
+        
         private static void DeduplicateAndMerge(List<ContextMenuItem> list)
         {
             if (list == null || list.Count <= 1) return;
 
-            // key → first item index that matched
+            
             var seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             var indicesToRemove = new HashSet<int>();
 
@@ -334,18 +334,18 @@ namespace DiskCleaner.ViewModels
                 var item = list[i];
                 string key;
                 var cat = item.Category.ToString();
-                // 位数标识：WOW6432Node 路径 → "wow64"，否则 "x64"。
-                // 同一 CLSID 同时注册在 64 位和 32 位注册表时不合并，让 UI 分行显示 X64/X86。
+                
+                
                 var bitness = (item.RegistryPath != null && item.RegistryPath.StartsWith("WOW6432Node\\", StringComparison.OrdinalIgnoreCase))
                     ? "wow64" : "x64";
                 switch (item.ItemType)
                 {
                     case ContextMenuItemType.ShellExtension:
-                        // 用 Category + 位数 + CLSID（Command 字段）作为去重键，避免文件/桌面/32-64位同名扩展混删
+                        
                         key = $"ext|{cat}|{bitness}|" + (item.Command ?? item.OriginalKeyName ?? item.Name);
                         break;
                     case ContextMenuItemType.ShellVerb:
-                        // 用 Category + 位数 + (RegistryPath 不含 shell 部分 + KeyName) 作为去重键
+                        
                         var regBase = item.RegistryPath?.Replace(@"\shell", "");
                         key = $"verb|{cat}|{bitness}|{regBase}|{item.OriginalKeyName}";
                         break;
@@ -359,9 +359,9 @@ namespace DiskCleaner.ViewModels
 
                 if (seen.TryGetValue(key, out int firstIdx))
                 {
-                    // 找到重复：合并到第一个
+                    
                     var first = list[firstIdx];
-                    // 合并作用域（去重）
+                    
                     var newScopes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     foreach (var s in (first.Scope ?? "").Split(new[] { ',', '，' }, StringSplitOptions.RemoveEmptyEntries))
                         newScopes.Add(s.Trim());
@@ -369,7 +369,7 @@ namespace DiskCleaner.ViewModels
                         newScopes.Add(s.Trim());
                     first.Scope = string.Join("，", newScopes);
 
-                    // 合并 AllRegistryEntries
+                    
                     foreach (var entry in item.AllRegistryEntries)
                     {
                         bool exists = false;
@@ -379,7 +379,7 @@ namespace DiskCleaner.ViewModels
                         if (!exists) first.AllRegistryEntries.Add(entry);
                     }
 
-                    // 若第一个未启用，则继承启用状态（取 OR）
+                    
                     if (item.IsEnabled && !first.IsEnabled)
                         first.SetInitialState(true);
 
@@ -391,7 +391,7 @@ namespace DiskCleaner.ViewModels
                 }
             }
 
-            // 从列表中移除重复项（反向删除以保持索引稳定）
+            
             if (indicesToRemove.Count > 0)
             {
                 var sorted = indicesToRemove.OrderDescending().ToList();
@@ -400,16 +400,16 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 标记同时存在 x64 和 x86 版本的同名扩展，让它们显示位数后缀。
-        /// 只有当同一个 Name 在列表中同时有 IsWow64=true 和 IsWow64=false 的项时，
-        /// 才给这些项设置 ShowBitnessSuffix = true，避免单项时的视觉噪音。
-        /// </summary>
+        
+        
+        
+        
+        
         private static void MarkDuplicateBitness(List<ContextMenuItem> list)
         {
             if (list == null || list.Count <= 1) return;
 
-            // 按名称分组，统计每个名称是否同时存在 x64 和 x86
+            
             var nameHasX64 = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var nameHasX86 = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -422,11 +422,11 @@ namespace DiskCleaner.ViewModels
                     nameHasX64.Add(item.Name);
             }
 
-            // 找出同时存在的名称
+            
             var duplicateNames = nameHasX64.Intersect(nameHasX86, StringComparer.OrdinalIgnoreCase).ToList();
             if (duplicateNames.Count == 0) return;
 
-            // 给这些名称的所有项标记 ShowBitnessSuffix
+            
             var duplicateSet = new HashSet<string>(duplicateNames, StringComparer.OrdinalIgnoreCase);
             foreach (var item in list)
             {
@@ -504,12 +504,12 @@ namespace DiskCleaner.ViewModels
         {
             try
             {
-                // 传统动词：command 子键
+                
                 using var cmdKey = verbKey.OpenSubKey("command", false);
                 if (cmdKey != null)
                     return cmdKey.GetValue(null) as string;
 
-                // 现代 Win11 动词：ExplorerCommand 子键（DelegateExecute）
+                
                 using var explorerCmd = verbKey.OpenSubKey("ExplorerCommand", false);
                 if (explorerCmd != null)
                 {
@@ -517,7 +517,7 @@ namespace DiskCleaner.ViewModels
                     if (!string.IsNullOrWhiteSpace(cmdId)) return cmdId;
                 }
 
-                // 某些动词把命令直接写在默认值里
+                
                 var def = verbKey.GetValue(null) as string;
                 if (!string.IsNullOrWhiteSpace(def) && def.Contains(".exe"))
                     return def;
@@ -526,10 +526,10 @@ namespace DiskCleaner.ViewModels
             return null;
         }
 
-        /// <summary>
-        /// 判定一个 Shell 扩展是否为 32 位（WOW64）。
-        /// 规则：注册表路径含 WOW6432Node，或键名含 "32"/"X86"/"Wow64"/"32bit" 等关键字（不区分大小写）。
-        /// </summary>
+        
+        
+        
+        
         private static bool IsWow64PathOrKey(string regPath, string keyName)
         {
             if (!string.IsNullOrWhiteSpace(regPath) &&
@@ -579,7 +579,7 @@ namespace DiskCleaner.ViewModels
                             ItemType = ContextMenuItemType.ShellExtension,
                             Scope = scope,
                             IsWin11TopLevel = isWin11,
-                            // 自动判定 32 位：路径含 WOW6432Node 或键名含 32/X86/Wow64 等关键字
+                            
                             IsWow64 = IsWow64PathOrKey(regPath, originalName)
                         };
                         extItem.AllRegistryEntries.Add(new RegistryPathEntry
@@ -611,9 +611,9 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 扫描 WOW6432Node 下的 Shell 扩展（32 位应用注册的右键菜单项）。
-        /// </summary>
+        
+        
+        
         private void ScanShellExtensionsWOW6432(string classPath, ContextMenuCategory category, string scope, List<ContextMenuItem> target,
             ref int scanned, ref int filtered, ref int added, ref int errored, List<string> firstErrors)
         {
@@ -652,7 +652,7 @@ namespace DiskCleaner.ViewModels
                             ItemType = ContextMenuItemType.ShellExtension,
                             Scope = scope,
                             IsWin11TopLevel = isWin11,
-                            // WOW6432Node 下的一定是 32 位
+                            
                             IsWow64 = true
                         };
                         extItem.AllRegistryEntries.Add(new RegistryPathEntry
@@ -688,12 +688,12 @@ namespace DiskCleaner.ViewModels
 
 
 
-        /// <summary>
-        /// 解析 Shell 扩展的图标：优先从 CLSID 的 DefaultIcon 取图标（最准确），
-        /// 回退到 InprocServer32/LocalServer32 的 DLL/EXE 图标，
-        /// 再回退到 DLL 同目录下的主程序 EXE 图标（对 WinRAR/Quark 等第三方扩展有效）。
-        /// 无法取得时回退为系统默认文件图标。
-        /// </summary>
+        
+        
+        
+        
+        
+        
         private static System.Windows.Media.ImageSource ResolveExtensionIcon(string guid, string name = null, string keyName = null)
         {
             if (string.IsNullOrWhiteSpace(guid)) return ShellIconHelper.GetDefaultFileIcon();
@@ -704,7 +704,7 @@ namespace DiskCleaner.ViewModels
                     ?? Registry.ClassesRoot.OpenSubKey($@"WOW6432Node\CLSID\{{{g}}}", false);
                 if (clsid == null) return ShellIconHelper.GetDefaultFileIcon();
 
-                // 1) 优先：CLSID 下的 DefaultIcon 键（最准确，通常指向功能自身的图标）
+                
                 using (var defIconKey = clsid.OpenSubKey("DefaultIcon", false))
                 {
                     if (defIconKey != null)
@@ -718,7 +718,7 @@ namespace DiskCleaner.ViewModels
                     }
                 }
 
-                // 2) 回退：从 InprocServer32/LocalServer32 的 DLL/EXE 取图标
+                
                 string dllPath = null;
                 using (var server = clsid.OpenSubKey("InprocServer32", false) ?? clsid.OpenSubKey("LocalServer32", false))
                 {
@@ -734,7 +734,7 @@ namespace DiskCleaner.ViewModels
                     if (icon != null && icon != ShellIconHelper.GetDefaultFileIcon())
                         return icon;
 
-                    // 3) 再回退：DLL 同目录下的主程序 EXE（WinRAR/Quark/AIMP 等常见第三方扩展）
+                    
                     var siblingExe = FindSiblingExecutableIcon(dllPath, name, keyName);
                     if (siblingExe != null) return siblingExe;
                 }
@@ -747,12 +747,12 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 对第三方 Shell 扩展，其实现 DLL 往往没有图标资源，但同目录下存在主程序 EXE。
-        /// 例如 WinRAR 的 rarext.dll 同目录下有 WinRAR.exe；Quark 的 ContextMenuExt DLL
-        /// 同目录下有 Quark.exe。本方法在该目录下查找最合适的 EXE 并提取图标。
-        /// 位于 Windows 系统目录下的 DLL 会被忽略，避免误取系统程序图标。
-        /// </summary>
+        
+        
+        
+        
+        
+        
         private static System.Windows.Media.ImageSource FindSiblingExecutableIcon(string dllPath, string name, string keyName)
         {
             if (string.IsNullOrWhiteSpace(dllPath)) return null;
@@ -761,7 +761,7 @@ namespace DiskCleaner.ViewModels
                 dllPath = Environment.ExpandEnvironmentVariables(dllPath).Trim().Trim('"');
                 if (!File.Exists(dllPath)) return null;
 
-                // 忽略 Windows 系统目录下的 DLL，避免误取系统程序图标
+                
                 var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
                 if (!string.IsNullOrWhiteSpace(winDir))
                 {
@@ -777,7 +777,7 @@ namespace DiskCleaner.ViewModels
                 var exes = Directory.GetFiles(dir, "*.exe", SearchOption.TopDirectoryOnly);
                 if (exes.Length == 0) return null;
 
-                // 优先匹配与显示名或键名相关的 EXE（如 WinRAR）
+                
                 var hints = new[] { name, keyName }
                     .Where(h => !string.IsNullOrWhiteSpace(h))
                     .Select(h => h.Replace(" ", "").Replace(".", "").Replace("ContextMenu", "").Replace("Ext", ""))
@@ -796,7 +796,7 @@ namespace DiskCleaner.ViewModels
                     }
                 }
 
-                // 无匹配提示时，取目录下最大的 EXE（通常是主程序而非卸载程序/助手）
+                
                 var mainExe = exes
                     .Select(e => new { Path = e, Size = new FileInfo(e).Length })
                     .OrderByDescending(x => x.Size)
@@ -809,10 +809,10 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 解析注册表图标值字符串（如 "C:\path\file.dll,0" / "@shell32.dll,-123"），
-        /// 按指定索引从 DLL/EXE 中提取图标。返回 null 表示取不到。
-        /// </summary>
+        
+        
+        
+        
         private static System.Windows.Media.ImageSource ResolveIconValue(string iconVal)
         {
             if (string.IsNullOrWhiteSpace(iconVal)) return null;
@@ -820,7 +820,7 @@ namespace DiskCleaner.ViewModels
             {
                 iconVal = iconVal.Trim();
 
-                // 资源引用形式：@shell32.dll,-123
+                
                 if (iconVal.StartsWith("@", StringComparison.Ordinal))
                 {
                     var path = iconVal.TrimStart('@');
@@ -840,7 +840,7 @@ namespace DiskCleaner.ViewModels
                     return null;
                 }
 
-                // 普通形式：C:\path\file.dll,0  或  C:\path\file.exe
+                
                 var parts = iconVal.Split(',');
                 var filePath = parts[0].Trim().Trim('"');
                 filePath = Environment.ExpandEnvironmentVariables(filePath);
@@ -861,14 +861,14 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 为单个右键项解析并设置图标（应在 UI/STA 线程上调用）。
-        /// 按类型取不同的图标来源：
-        ///   动词 → 注册表 Icon 值 > command 里的 exe > 默认图标
-        ///   扩展 → CLSID DefaultIcon > InprocServer32 DLL > 默认图标
-        ///   新建项 → 文件类型图标
-        /// 取不到的一律回退系统默认文件图标（保证 Icon 永不为 null）。
-        /// </summary>
+        
+        
+        
+        
+        
+        
+        
+        
         private static void SetItemIcon(ContextMenuItem item)
         {
             try
@@ -880,12 +880,12 @@ namespace DiskCleaner.ViewModels
                 {
                     case ContextMenuItemType.ShellVerb:
                         {
-                            // ① 优先：注册表 shell\<verb> 下的 Icon 值
-                            //    格式可能是 "C:\path\app.exe,0" / "@shell32.dll,-28577" / "app.exe,1"
+                            
+                            
                             icon = ResolveVerbIcon(item.RegistryPath, item.KeyName);
                             iconSource = $"verb-icon:{item.RegistryPath}\\{item.KeyName}";
 
-                            // ② 回退：从 command 提取 exe 路径
+                            
                             if (icon == null)
                             {
                                 var exePath = ShellIconHelper.ExtractExecutablePath(item.Command);
@@ -932,11 +932,11 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 从注册表 shell\<verb> 键的 Icon 值解析图标。
-        /// 支持格式："C:\path\app.exe,0" / "@shell32.dll,-28577" / "app.exe,1"
-        /// 返回 null 表示取不到。
-        /// </summary>
+        
+        
+        
+        
+        
         private static ImageSource ResolveVerbIcon(string registryPath, string keyName)
         {
             if (string.IsNullOrWhiteSpace(registryPath) || string.IsNullOrWhiteSpace(keyName))
@@ -956,12 +956,12 @@ namespace DiskCleaner.ViewModels
         }
 
 
-        /// <summary>
-        /// 刷新 Windows Shell，使右键菜单 / Shell 扩展的改动立即生效。
-        /// 采用 SHChangeNotify 通知 Shell 关联已变更，无需结束并重启 explorer.exe 进程
-        /// （既避免杀软把“操控系统进程”判为木马行为，也不会关掉用户已打开的资源管理器窗口）。
-        /// 极端情况下（个别 Shell 扩展缓存未刷新）仍可在任务管理器手动重启 explorer。
-        /// </summary>
+        
+        
+        
+        
+        
+        
         private void RestartExplorerCore()
         {
             try
@@ -987,8 +987,8 @@ namespace DiskCleaner.ViewModels
             {
                 using var root = Registry.ClassesRoot;
 
-                // 通过 ContextMenuMapping 动态枚举所有候选键（扩展名键 + 特殊键）
-                // 不使用任何硬编码的扩展名或特殊键清单，未来新出现的特殊键会自动被发现。
+                
+                
                 foreach (var keyName in ContextMenuMapping.EnumerateNewMenuCandidateKeys(root))
                 {
                     scanned++;
@@ -998,16 +998,16 @@ namespace DiskCleaner.ViewModels
                         using var extKey = root.OpenSubKey(keyName, false);
                         if (extKey == null) continue;
 
-                        // === 1. 直接 ShellNew：HKCR\keyName\ShellNew ===
+                        
                         bool foundDirectEnabled = AddShellNewItem(root, keyName, keyName, false, target,
                             ref added, ref filtered, ShowSystemItems);
                         if (!foundDirectEnabled)
                             AddShellNewItem(root, keyName, keyName, false, target,
                                 ref added, ref filtered, ShowSystemItems, checkDisabled: true);
 
-                        // === 2. 嵌套 ShellNew：HKCR\keyName\ProgID\ShellNew ===
-                        // 遍历子键（如 Word.Document.12、Excel.Sheet.12 等），
-                        // 使用 ContextMenuMapping.NonProgIdSubKeysOfExt 统一排除噪音子键。
+                        
+                        
+                        
                         try
                         {
                             foreach (var subKeyName in extKey.GetSubKeyNames())
@@ -1018,15 +1018,15 @@ namespace DiskCleaner.ViewModels
                                     using var subKey = extKey.OpenSubKey(subKeyName, false);
                                     if (subKey == null) continue;
 
-                                    // 跳过 OpenWithProgids / ShellEx / ShellNew 等非 ProgID 噪音子键
+                                    
                                     if (ContextMenuMapping.NonProgIdSubKeysOfExt.Contains(subKeyName))
                                         continue;
 
-                                    // 检查该子键下是否有 ShellNew
+                                    
                                     bool foundDirect = AddShellNewItem(root, keyName, $"{keyName}\\{subKeyName}", true, target,
                                         ref added, ref filtered, ShowSystemItems);
 
-                                    // 同时检查是否有已禁用的 ShellNew
+                                    
                                     if (!foundDirect)
                                         AddShellNewItem(root, keyName, $"{keyName}\\{subKeyName}", true, target,
                                             ref added, ref filtered, ShowSystemItems, checkDisabled: true);
@@ -1039,7 +1039,7 @@ namespace DiskCleaner.ViewModels
                                 }
                             }
                         }
-                        catch { /* 遍历子键失败不影响主流程 */ }
+                        catch {   }
                     }
                     catch (Exception ex)
                     {
@@ -1057,20 +1057,20 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 尝试添加一个 ShellNew 菜单项（启用或禁用状态）。
-        /// 支持直接路径（HKCR\.ext\ShellNew）和嵌套路径（HKCR\.ext\ProgID\ShellNew）。
-        /// </summary>
-        /// <param name="root">HKCR 根键</param>
-        /// <param name="commandKey">原始扩展名键名（如 .docx），用作 Command 和图标查找</param>
-        /// <param name="registryPath">注册表父路径（如 .docx 或 .docx\Word.Document.12）</param>
-        /// <param name="isNested">是否为嵌套路径（影响显示名查找策略）</param>
-        /// <param name="target">目标列表</param>
-        /// <param name="added">已添加计数</param>
-        /// <param name="filtered">已过滤计数</param>
-        /// <param name="showSystemItems">是否显示系统项</param>
-        /// <param name="checkDisabled">true=只检查已禁用的 ShellNew，false=只检查已启用的</param>
-        /// <returns>是否找到了对应的 ShellNew 键</returns>
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         private bool AddShellNewItem(RegistryKey root, string commandKey, string registryPath,
             bool isNested, List<ContextMenuItem> target,
             ref int added, ref int filtered, bool showSystemItems,
@@ -1085,7 +1085,7 @@ namespace DiskCleaner.ViewModels
                 using var shellNew = parentKey.OpenSubKey(sourceKeyName, false);
                 if (shellNew == null) return false;
 
-                // 系统项过滤
+                
                 if (!showSystemItems && ContextMenuMapping.IsSystemNewMenuItem(commandKey))
                 {
                     filtered++;
@@ -1124,10 +1124,10 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        // ---------- 启用 / 禁用切换 ----------
-        /// <summary>
-        /// 由 ContextMenuItem.IsEnabled 的 TwoWay 绑定触发，负责把期望状态同步到注册表。
-        /// </summary>
+        
+        
+        
+        
         private bool ContextMenuToggleHandler(ContextMenuItem item, bool desired)
         {
             if (item == null || item.IsProtected) return false;
@@ -1179,7 +1179,7 @@ namespace DiskCleaner.ViewModels
             }
             if (succeeded == 0) throw firstEx ?? new InvalidOperationException("未找到要修改的注册表项。");
 
-            // 更新主路径字段以保持一致性
+            
             if (item.AllRegistryEntries.Count > 0)
             {
                 item.RegistryPath = item.AllRegistryEntries[0].RegistryPath;
@@ -1221,7 +1221,7 @@ namespace DiskCleaner.ViewModels
                     parent.DeleteSubKeyTree(sourceName, false);
                     succeeded++;
 
-                    // 更新当前条目记录（struct 需通过索引器回写）
+                    
                     entry.KeyName = targetName;
                     item.AllRegistryEntries[idx] = entry;
                 }
@@ -1229,7 +1229,7 @@ namespace DiskCleaner.ViewModels
             }
             if (succeeded == 0) throw firstEx ?? new InvalidOperationException("未找到要修改的注册表项。");
 
-            // 同步主路径字段
+            
             if (item.AllRegistryEntries.Count > 0)
             {
                 item.RegistryPath = item.AllRegistryEntries[0].RegistryPath;
@@ -1285,12 +1285,12 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        // ---------- 永久删除 / 撤销 ----------
-        /// <summary>
-        /// 永久删除一个右键菜单项：删除前将其注册表项导出为 .reg 备份（位于 _contextMenuBackupDir），
-        /// 再从注册表删除该键。删除后该项仍保留在列表中、状态变为"已删除"，按钮就地变为"撤销"，
-        /// 运行期间可随时撤销（备份 .reg + 持久化清单）；退出程序后备份自动清理，已删除项彻底不可恢复。受保护项不允许删除。
-        /// </summary>
+        
+        
+        
+        
+        
+        
         private void DeleteContextMenuItemCore(ContextMenuItem item)
         {
             if (item == null || !item.CanDelete || item.IsDeleted) return;
@@ -1309,7 +1309,7 @@ namespace DiskCleaner.ViewModels
                     string fullKey = $@"HKCR\{entry.RegistryPath}\{entry.KeyName}";
                     string backupFile = null;
 
-                    // 1) 删除前备份（失败不阻断删除，仅影响撤销能力）
+                    
                     try
                     {
                         var safe = string.Concat((item.Name + "_" + entry.KeyName + "_" + entry.RegistryPath).Split(Path.GetInvalidFileNameChars()));
@@ -1319,7 +1319,7 @@ namespace DiskCleaner.ViewModels
                     }
                     catch (Exception ex) { _logger?.Error($"备份右键项失败: {item.Name}", ex); }
 
-                    // 2) 从注册表删除
+                    
                     bool deletedThisEntry = false;
                     try
                     {
@@ -1333,7 +1333,7 @@ namespace DiskCleaner.ViewModels
                     }
                     catch (Exception ex) { _logger?.Error($"删除注册表项失败: {fullKey}", ex); }
 
-                    // 3) 只有成功备份的条目才写入持久化清单，否则「撤销」无法真正恢复
+                    
                     if (deletedThisEntry && backupFile != null)
                     {
                         PersistDeletedEntry(new DeletedManifestEntry
@@ -1348,7 +1348,7 @@ namespace DiskCleaner.ViewModels
                     }
                 }
 
-                // 4) 至少成功删除一个条目才标记为已删除；全失败时保持原状，避免 UI 与注册表不一致
+                
                 if (deletedCount == 0)
                 {
                     _logger?.Error($"永久删除右键项失败（未删除任何条目）: {item.Name}");
@@ -1363,10 +1363,10 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 撤销（恢复）一个已删除的右键菜单项：重新导入其 .reg 备份、从持久化清单移除并删除备份文件，
-        /// 再将列表中该项标记回"未删除"使其重新可用。仅在程序运行期间可撤销，退出后备份自动清理。
-        /// </summary>
+        
+        
+        
+        
         private void RestoreContextMenuItemCore(ContextMenuItem item)
         {
             if (item == null || !item.IsDeleted) return;
@@ -1394,8 +1394,8 @@ namespace DiskCleaner.ViewModels
                 }
 
                 _uiDispatcher.Invoke(() => item.IsDeleted = false);
-                // 不再强制 SetInitialState(true)：恢复后保留删除前的启用状态，
-                // 避免把原本处于禁用态的项错误显示为“已启用”。
+                
+                
                 _logger?.Info($"已撤销删除右键项: {item.Name} ({restoredCount}/{entries.Count} 个注册表路径已恢复)");
             }
             catch (Exception ex)
@@ -1404,11 +1404,11 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 扫描完成后调用：读取持久化清单，把"有备份但注册表中已不存在"的项重新以"已删除（可撤销）"状态
-        /// 放回对应列表。正常情况下程序退出时备份已清理、清单为空，此方法不会恢复任何项；
-        /// 保留此方法仅作为异常退出（崩溃/强杀进程）后的安全网。
-        /// </summary>
+        
+        
+        
+        
+        
         private void RehydrateDeletedItems()
         {
             var entries = LoadDeletedManifest();
@@ -1416,17 +1416,17 @@ namespace DiskCleaner.ViewModels
             var stale = new List<DeletedManifestEntry>();
             foreach (var e in entries)
             {
-                // 注册表项仍然存在（已恢复或外部重建）→ 不属于“已删除”，清理清单
+                
                 if (RegistryKeyExists(e.RegistryPath, e.KeyName))
                 {
                     stale.Add(e);
                     continue;
                 }
-                // 已在列表中（例如本次会话内刚删除）→ 跳过，避免重复
+                
                 if (FindLiveItem(e.RegistryPath, e.KeyName, (ContextMenuCategory)e.Category) != null)
                     continue;
 
-                // 从清单数据推断 ItemType（清单不存储此字段）
+                
                 ContextMenuItemType inferredType;
                 if (e.KeyName == "ShellNew" || e.KeyName == "__DC_Disabled_ShellNew")
                     inferredType = ContextMenuItemType.ShellNew;
@@ -1435,7 +1435,7 @@ namespace DiskCleaner.ViewModels
                 else
                     inferredType = ContextMenuItemType.ShellVerb;
 
-                // 推断 OriginalKeyName
+                
                 string originalName = inferredType == ContextMenuItemType.ShellNew
                     ? "ShellNew"
                     : (e.KeyName.StartsWith("__DC_Disabled_") ? e.KeyName.Substring("__DC_Disabled_".Length) : e.KeyName);
@@ -1475,10 +1475,10 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 程序退出时调用：清理所有右键项的 .reg 备份和持久化清单。
-        /// 删除操作在运行期间可撤销；退出程序后已删除项彻底不可恢复。
-        /// </summary>
+        
+        
+        
+        
         public static void PurgeDeletedBackupsOnExit()
         {
             try
@@ -1489,7 +1489,7 @@ namespace DiskCleaner.ViewModels
             catch { }
         }
 
-        // ---------- 已删除项持久化清单（仅当前会话可撤销） ----------
+        
         private static readonly object _manifestLock = new();
         private static readonly string _deletedManifestPath =
             Path.Combine(_contextMenuBackupDir, "deleted-manifest.json");
@@ -1597,7 +1597,7 @@ namespace DiskCleaner.ViewModels
             catch { return false; }
         }
 
-        /// <summary>将注册表项导出为 .reg 文件（纯托管实现，等价于 reg.exe export；递归导出整棵键）。</summary>
+        
         private static bool RegExport(string keyPath, string file)
         {
             try
@@ -1610,13 +1610,13 @@ namespace DiskCleaner.ViewModels
                 sb.AppendLine("Windows Registry Editor Version 5.00");
                 sb.AppendLine();
                 ExportRegKey(key, GetRegHiveName(root) + (subPath.Length > 0 ? "\\" + subPath : ""), sb);
-                File.WriteAllText(file, sb.ToString(), Encoding.Unicode); // UTF-16 LE + BOM，与 reg.exe export 一致
+                File.WriteAllText(file, sb.ToString(), Encoding.Unicode); 
                 return true;
             }
             catch { return false; }
         }
 
-        /// <summary>导入 .reg 文件（纯托管实现，等价于 reg.exe import；兼容标准 .reg v5.00 格式）。</summary>
+        
         private static bool RegImport(string file)
         {
             try
@@ -1631,7 +1631,7 @@ namespace DiskCleaner.ViewModels
                 else
                     text = Encoding.Default.GetString(bytes);
 
-                // 合并以反斜杠结尾的续行（hex 多行）
+                
                 var rawLines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
                 var lines = new List<string>();
                 string pending = null;
@@ -1848,7 +1848,7 @@ namespace DiskCleaner.ViewModels
             string data = line.Substring(eq + 1).Trim();
             string name = namePart == "@" ? "" : UnescapeRegString(namePart.Trim('"'));
 
-            if (data == "-") // 删除值
+            if (data == "-") 
             {
                 try { key.DeleteValue(name, false); } catch { }
                 return;
@@ -1897,7 +1897,7 @@ namespace DiskCleaner.ViewModels
             }
             else
             {
-                key.SetValue(name, "", RegistryValueKind.String); // 形如 @= 或 "name"=（空字符串）
+                key.SetValue(name, "", RegistryValueKind.String); 
             }
         }
 

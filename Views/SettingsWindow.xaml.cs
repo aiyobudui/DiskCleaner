@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using DiskCleaner.Models;
 using DiskCleaner.Services;
 using DiskCleaner.ViewModels;
@@ -38,7 +38,7 @@ namespace DiskCleaner.Views
             }
             catch (Exception ex)
             {
-                // 保存失败时不要用 async void 把异常抛到 Dispatcher 导致崩溃，弹窗提示即可
+                
                 MessageBox.Show($"保存设置失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally

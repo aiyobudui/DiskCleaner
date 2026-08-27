@@ -1,4 +1,4 @@
-using DiskCleaner.Models;
+﻿using DiskCleaner.Models;
 using DiskCleaner.Services;
 using Microsoft.Win32;
 using System;
@@ -11,15 +11,15 @@ using System.Windows.Input;
 
 namespace DiskCleaner.ViewModels
 {
-    /// <summary>
-    /// 系统设置标签页：用户文件夹搬迁（重定向）+ HOSTS 文件编辑。
-    /// </summary>
+    
+    
+    
     public partial class MainViewModel : ViewModelBase
     {
-        // ---------- 集合 ----------
+        
         private ObservableCollection<UserFolderInfo> _userFolders = new();
 
-        // ---------- 展开状态 ----------
+        
         private bool _isFolderMigrationExpanded;
         private bool _isHostsExpanded;
         private bool _isUacExpanded;
@@ -28,7 +28,7 @@ namespace DiskCleaner.ViewModels
         private bool _isExplorerExpanded;
         private bool _isNotepadExpanded;
 
-        // ---------- 属性 ----------
+        
         public ObservableCollection<UserFolderInfo> UserFolders
         {
             get => _userFolders;
@@ -43,14 +43,14 @@ namespace DiskCleaner.ViewModels
         public bool IsExplorerExpanded { get => _isExplorerExpanded; set => SetProperty(ref _isExplorerExpanded, value); }
         public bool IsNotepadExpanded { get => _isNotepadExpanded; set => SetProperty(ref _isNotepadExpanded, value); }
 
-        // ---------- 命令 ----------
+        
         public ICommand LoadUserFoldersCommand { get; private set; }
         public ICommand BrowseUserFolderCommand { get; private set; }
         public ICommand MoveUserFolderCommand { get; private set; }
         public ICommand RestoreUserFolderCommand { get; private set; }
         public ICommand OpenHostsFileCommand { get; private set; }
 
-        // ---------- 加载 ----------
+        
         internal async Task LoadUserFoldersAsync()
         {
             await Task.Run(() =>
@@ -67,7 +67,7 @@ namespace DiskCleaner.ViewModels
             });
         }
 
-        // ---------- 浏览新位置 ----------
+        
         private void BrowseUserFolder(UserFolderInfo info)
         {
             if (info == null) return;
@@ -83,7 +83,7 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        // ---------- 搬迁 ----------
+        
         private async Task MoveUserFolderAsync(UserFolderInfo info)
         {
             if (info == null) return;
@@ -117,7 +117,7 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        // ---------- 恢复默认 ----------
+        
         private async Task RestoreUserFolderAsync(UserFolderInfo info)
         {
             if (info == null) return;
@@ -144,7 +144,7 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        // ---------- 打开 HOSTS 文件 ----------
+        
         private void OpenHostsFile()
         {
             try
@@ -155,7 +155,7 @@ namespace DiskCleaner.ViewModels
                     MessageBox.Show("未找到 HOSTS 文件。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                     return;
                 }
-                // 用记事本以管理员身份打开（写 hosts 需要提权）
+                
                 using var hostsEditor = Process.Start(new ProcessStartInfo
                 {
                     FileName = "notepad.exe",
@@ -166,7 +166,7 @@ namespace DiskCleaner.ViewModels
             }
             catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
             {
-                // 用户取消了 UAC 提权，属正常取消，不弹错误框
+                
             }
             catch (Exception ex)
             {
@@ -175,9 +175,9 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        // ---------- 系统策略：UAC / SmartScreen / 任务栏 / 桌面图标 / 资源管理器 ----------
-        private bool _isLoadingTweaks; // 加载当前值时抑制自动写入，仅显示
-        private int _tweakLoadToken;   // 加载序号：防止快速切换 Tab 时多次加载交叠覆盖
+        
+        private bool _isLoadingTweaks; 
+        private int _tweakLoadToken;   
 
         private int _uacLevelIndex;
         public int UacLevelIndex
@@ -363,7 +363,7 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        // ---------- 记事本设置 ----------
+        
         public bool NotepadOpenInNewTab
         {
             get => _notepadOpenInNewTab;
@@ -410,9 +410,39 @@ namespace DiskCleaner.ViewModels
             }
         }
 
+        /// <summary>
+        /// 打开文件方式：0 = 在新选项卡中打开；1 = 在新窗口中打开。
+        /// 对应新记事本设置页的「打开文件」下拉项。
+        /// </summary>
+        public int NotepadOpenInNewTabIndex
+        {
+            get => _notepadOpenInNewTab ? 0 : 1;
+            set
+            {
+                if (value < 0) return;
+                NotepadOpenInNewTab = (value == 0);
+                OnPropertyChanged(nameof(NotepadOpenInNewTabIndex));
+            }
+        }
+
+        /// <summary>
+        /// 记事本启动方式：0 = 启动新会话并放弃未保存的更改；1 = 继续上一个会话。
+        /// 对应新记事本设置页的「记事本启动时」下拉项。
+        /// </summary>
+        public int NotepadNewSessionIndex
+        {
+            get => _notepadNewSession ? 0 : 1;
+            set
+            {
+                if (value < 0) return;
+                NotepadNewSession = (value == 0);
+                OnPropertyChanged(nameof(NotepadNewSessionIndex));
+            }
+        }
+
         internal async Task LoadSystemTweaksAsync()
         {
-            // 递增加载序号；只有最新一次加载的结果才允许写回 UI，避免旧加载覆盖新值
+            
             var token = System.Threading.Interlocked.Increment(ref _tweakLoadToken);
 
             int uac = 0;
@@ -457,15 +487,15 @@ namespace DiskCleaner.ViewModels
                 return;
             }
 
-            if (!ok || token != _tweakLoadToken) return; // 已被更新的加载取代，丢弃本次结果
+            if (!ok || token != _tweakLoadToken) return; 
 
             _uiDispatcher.Invoke(() =>
             {
-                if (token != _tweakLoadToken) return; // 二次校验，彻底避免覆盖
-                _isLoadingTweaks = true; // 仅显示当前值，不写注册表
+                if (token != _tweakLoadToken) return; 
+                _isLoadingTweaks = true; 
                 try
                 {
-                    // 直接写字段 + 强制通知，确保无论是否等于默认值 UI 都刷新
+                    
                     _uacLevelIndex = uac; OnPropertyChanged(nameof(UacLevelIndex));
                     _smartScreenEnabled = smart; OnPropertyChanged(nameof(SmartScreenEnabled));
                     _taskbarGlom = glom; OnPropertyChanged(nameof(TaskbarGlom));
@@ -480,6 +510,8 @@ namespace DiskCleaner.ViewModels
                     _showSuperHidden = super; OnPropertyChanged(nameof(ShowSuperHidden));
                     _notepadOpenInNewTab = notepadTab; OnPropertyChanged(nameof(NotepadOpenInNewTab));
                     _notepadNewSession = notepadNewSession; OnPropertyChanged(nameof(NotepadNewSession));
+                    OnPropertyChanged(nameof(NotepadOpenInNewTabIndex));
+                    OnPropertyChanged(nameof(NotepadNewSessionIndex));
                 }
                 finally
                 {

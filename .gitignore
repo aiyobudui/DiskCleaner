@@ -130,3 +130,6 @@ Debug/
 # 备份目录
 backup/
 backup_*/
+
+# 代码注释迁出文档（仅本地说明，不推送 GitHub）
+项目说明.md

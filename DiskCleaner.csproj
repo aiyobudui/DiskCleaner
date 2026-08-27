@@ -15,7 +15,7 @@
     <NoWarn>CA1416;NU1701</NoWarn>
     <Company>WinClaw</Company>
     <Product>九歌・系统清洁小工具</Product>
-    <Version>0.9.0</Version>
+    <Version>0.9.1</Version>
     <!-- 版本号统一调用：$(Version) 是唯一真相源，下面两个通过 MSBuild 变量自动同步。
          代码通过 Assembly.GetExecutingAssembly().GetName().Version 读取 AssemblyVersion；
          XAML 通过 Binding 到 VersionSuffix 属性显示版本。改版本号只需改 <Version> 一处。 -->
@@ -46,9 +46,11 @@
     <Compile Include="Services/*.cs" />
     <Compile Include="ViewModels/*.cs" />
     <Compile Include="Views/*.cs" />
+    <Compile Include="Behaviors/*.cs" />
     <ApplicationDefinition Include="App.xaml" />
     <Page Include="Views/MainWindow.xaml" />
     <Page Include="Views/SettingsWindow.xaml" />
+    <Page Include="Views/FailureDetailsWindow.xaml" />
   </ItemGroup>
 
 </Project>

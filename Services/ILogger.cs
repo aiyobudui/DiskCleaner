@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace DiskCleaner.Services
 {
@@ -10,10 +10,10 @@ namespace DiskCleaner.Services
         void Debug(string message);
     }
 
-    /// <summary>
-    /// 空日志实现：不写任何文件，仅满足 ILogger 接口。
-    /// 移除文件日志功能后所有 _logger 调用均为空操作，避免程序目录生成 DiskCleaner.log。
-    /// </summary>
+    
+    
+    
+    
     public class NullLogger : ILogger
     {
         public void Info(string message) { }
@@ -31,7 +31,7 @@ namespace DiskCleaner.Services
         {
             lock (_lock)
             {
-                // 仅使用空实现，不生成任何日志文件
+                
                 _instance ??= new NullLogger();
             }
         }

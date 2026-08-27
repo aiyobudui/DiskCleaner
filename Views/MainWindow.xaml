@@ -4,14 +4,16 @@
         xmlns:vm="clr-namespace:DiskCleaner.ViewModels"
         xmlns:cv="clr-namespace:DiskCleaner.Converters"
         xmlns:m="clr-namespace:DiskCleaner.Models"
+        xmlns:b="clr-namespace:DiskCleaner.Behaviors"
         Title="九歌・系统清洁小工具" Height="780" Width="1200"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None" ResizeMode="CanResize"
         Background="{DynamicResource bg-primary}" Foreground="{DynamicResource text-primary}">
 
     <WindowChrome.WindowChrome>
-        <!-- 去掉系统非客户区白边/标题栏，保留 6px 透明可调整区域和 DWM 阴影 -->
-        <WindowChrome GlassFrameThickness="0" CaptionHeight="0"
+        <!-- 自定义无边框窗口：用 CaptionHeight 让操作系统在标题栏区域(顶 38px)原生处理拖拽与双击最大化，
+             零延迟、任意 DPI 稳定。标题栏内按钮需 IsHitTestVisibleInChrome=True 才能正常点击。 -->
+        <WindowChrome GlassFrameThickness="0" CaptionHeight="38"
                       ResizeBorderThickness="6" CornerRadius="0"/>
     </WindowChrome.WindowChrome>
 
@@ -25,6 +27,7 @@
         <cv:ScanStatusToVisibilityConverter x:Key="ScanStatusToVisibility"/>
         <cv:AdminLockVisibilityConverter x:Key="AdminLockVisibility"/>
         <cv:AdminLockEnabledConverter x:Key="AdminLockEnabled"/>
+        <cv:BoolToBorderThicknessConverter x:Key="BoolToBorderThickness"/>
 
         <!-- 清理树节点模板：按数据类型自动选择，支持分组嵌 ?-->
         <!--
@@ -35,7 +38,7 @@
         -->
         <DataTemplate DataType="{x:Type m:CleanGroup}">
             <StackPanel Visibility="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}">
-                <Border Background="Transparent" Padding="16,8,16,8">
+                <Border Style="{DynamicResource GroupHeader}" Padding="16,8,16,8">
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="32"/>
@@ -116,15 +119,11 @@
                             <TextBlock Text="&#x24D8;" FontSize="14" Foreground="{DynamicResource text-muted}"
                                        VerticalAlignment="Center" Margin="6,0,0,0" Cursor="Help"
                                        ToolTipService.InitialShowDelay="100"
-                                       ToolTipService.BetweenShowDelay="0"
+                                       ToolTipService.BetweenShowDelay="30000"
                                        ToolTipService.ShowDuration="20000">
                                 <TextBlock.ToolTip>
-                                    <ToolTip MaxWidth="360">
-                                        <StackPanel>
-                                            <TextBlock Text="{Binding Description}" TextWrapping="Wrap" FontSize="12" Margin="0,0,0,6"/>
-                                            <TextBlock Text="{Binding FailureHint}" TextWrapping="Wrap" FontSize="12" Foreground="#F38BA8"
-                                                       Visibility="{Binding FailureHint, Converter={StaticResource StringToVisibility}}"/>
-                                        </StackPanel>
+                                    <ToolTip MaxWidth="420">
+                                        <TextBlock Text="{Binding Description}" TextWrapping="Wrap" FontSize="12"/>
                                     </ToolTip>
                                 </TextBlock.ToolTip>
                             </TextBlock>
@@ -132,16 +131,23 @@
                                        Foreground="{Binding StatusColor}" VerticalAlignment="Center"
                                        Margin="6,0,0,0" Cursor="Help"
                                        ToolTipService.InitialShowDelay="100"
-                                       ToolTipService.BetweenShowDelay="0"
+                                       ToolTipService.BetweenShowDelay="30000"
                                        ToolTipService.ShowDuration="20000"
-                                       Visibility="{Binding Status, Converter={StaticResource ScanStatusToVisibility}}">
-                                <TextBlock.ToolTip>
-                                    <ToolTip MaxWidth="360">
-                                        <TextBlock Text="{Binding FailureHint}" TextWrapping="Wrap" FontSize="12" Foreground="#F38BA8"
-                                                   Visibility="{Binding FailureHint, Converter={StaticResource StringToVisibility}}"/>
-                                    </ToolTip>
-                                </TextBlock.ToolTip>
-                            </TextBlock>
+                                       ToolTip="点击右侧「查看清理项」查看将清理的位置与文件；失败项点「查看失败详情」"
+                                       Visibility="{Binding Status, Converter={StaticResource ScanStatusToVisibility}}"/>
+                            <Button Content="查看清理项" Command="{Binding ShowFailureDetailsCommand}" CommandParameter="{Binding}"
+                                    Visibility="{Binding HasTargetPathsOnly, Converter={StaticResource BoolToVisibility}}"
+                                    Style="{DynamicResource MiniButton}" FontSize="11" Padding="6,2" Margin="6,0,0,0"/>
+                            <Button Content="查看失败详情" Command="{Binding ShowFailureDetailsCommand}" CommandParameter="{Binding}"
+                                    Visibility="{Binding HasFailureDetails, Converter={StaticResource BoolToVisibility}}"
+                                    Style="{DynamicResource MiniButton}" FontSize="11" Padding="6,2" Margin="6,0,0,0"/>
+                            <!-- 浏览器/客户端正在运行时显示：关闭并清理按钮 -->
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0"
+                                        Visibility="{Binding CanKillAndClean, Converter={StaticResource BoolToVisibility}}">
+                                <Button Content="关闭并清理" Command="{Binding KillAndCleanCommand}" CommandParameter="{Binding}"
+                                        Style="{DynamicResource MiniButton}"
+                                        Foreground="{DynamicResource accent-red}" FontSize="11" Padding="6,2" Margin="4,0,0,0"/>
+                            </StackPanel>
                         </StackPanel>
                     </StackPanel>
                     <TextBlock Grid.Column="2" Text="{Binding SizeText}" FontSize="12"
@@ -173,6 +179,7 @@
 
         <!-- ══════════════ ?Sidebar TabControl Style ══════════════ ?-->
         <Style x:Key="SidebarNav" TargetType="TabControl">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Padding" Value="0"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Background" Value="Transparent"/>
@@ -189,13 +196,12 @@
                             <Border Grid.Column="0" Background="{DynamicResource bg-sidebar}">
                                 <DockPanel LastChildFill="True">
                                     <!-- Nav items host -->
-                                    <StackPanel IsItemsHost="True" KeyboardNavigation.TabIndex="1" Margin="0,12,0,0"/>
+                                    <StackPanel IsItemsHost="True" KeyboardNavigation.TabIndex="1" Margin="0,24,0,0"/>
                                 </DockPanel>
                             </Border>
 
                             <!-- Content area -->
-                                <Grid Grid.Column="1">
-                                    <!-- Tab content -->
+                            <Grid Grid.Column="1">
                                 <ContentPresenter ContentSource="SelectedContent"/>
                             </Grid>
                         </Grid>
@@ -206,10 +212,11 @@
 
         <!-- ══════════════ ?Nav Item (TabItem) Style  ?朴素侧边导航（非卡片 ?══════════════ ?-->
         <Style x:Key="NavItem" TargetType="TabItem">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="{DynamicResource text-muted}"/>
             <Setter Property="FontSize" Value="15"/>
-            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Template">
@@ -222,7 +229,6 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter Property="Foreground" Value="{DynamicResource accent-blue}"/>
-                                <Setter Property="FontWeight" Value="SemiBold"/>
                                 <Setter TargetName="Border" Property="Background" Value="{DynamicResource bg-tertiary}"/>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
@@ -237,6 +243,7 @@
 
         <!-- ══════════════ ?Button Styles ══════════════ ?-->
         <Style x:Key="SecondaryButton" TargetType="Button">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Background" Value="{DynamicResource bg-secondary}"/>
             <Setter Property="Foreground" Value="{DynamicResource text-primary}"/>
             <Setter Property="FontSize" Value="12"/>
@@ -288,9 +295,20 @@
             </Style.Triggers>
         </Style>
 
+        <!-- ══════════════ ?Group Header Style (可折叠分组标题统一样式) ══════════════ ?-->
+        <Style x:Key="GroupHeader" TargetType="Border">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Padding" Value="16,8,16,12"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource border-color}"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+        </Style>
+
         <!-- ══════════════ ?Progress Bar Styles ══════════════ ?-->
         <!-- 优雅的胶囊形进度条：确定态像素级精确填充，不确定态单条平滑滑动胶囊 -->
         <Style x:Key="RoundedProgress" TargetType="ProgressBar">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Height" Value="6"/>
             <Setter Property="MinHeight" Value="6"/>
             <Setter Property="BorderThickness" Value="0"/>
@@ -352,14 +370,17 @@
 
         <!-- ══════════════ ?ListBox Style ══════════════ ?-->
         <Style x:Key="ModernListBox" TargetType="ListBox">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="{DynamicResource text-primary}"/>
             <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="b:ScrollBubbleBehavior.Enabled" Value="True"/>
             <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
             <Setter Property="ItemContainerStyle">
                 <Setter.Value>
                     <Style TargetType="ListBoxItem">
                         <Setter Property="Background" Value="Transparent"/>
+                        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
                         <Setter Property="Padding" Value="0"/>
                         <Setter Property="Margin" Value="0,0,0,6"/>
                         <Setter Property="Template">
@@ -376,6 +397,7 @@
 
         <!-- ══════════════ ?TitleBar Button Styles ══════════════ ?-->
         <Style x:Key="WindowButton" TargetType="Button">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="{DynamicResource text-primary}"/>
             <Setter Property="BorderThickness" Value="0"/>
@@ -409,7 +431,9 @@
 
         <!-- ══════════════ ?CheckBox Style ══════════════ ?-->
         <Style x:Key="ModernCheckBox" TargetType="CheckBox">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Foreground" Value="{DynamicResource text-primary}"/>
+            <Setter Property="FontSize" Value="11"/>
             <Setter Property="VerticalContentAlignment" Value="Center"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
@@ -451,8 +475,144 @@
             </Setter>
         </Style>
 
+        <!-- ══════════════ ?ComboBox Styles ══════════════ ?-->
+        <Style x:Key="ModernComboBoxItem" TargetType="ComboBoxItem">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="MinHeight" Value="22"/>
+            <Setter Property="Padding" Value="8,2"/>
+            <Setter Property="Foreground" Value="{DynamicResource text-primary}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="Bd"
+                                Background="Transparent"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource accent-blue}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource text-on-accent}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource accent-blue}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource text-on-accent}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ModernComboBox" TargetType="ComboBox">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Background" Value="{DynamicResource bg-tertiary}"/>
+            <Setter Property="Foreground" Value="{DynamicResource text-primary}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource border-color}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="MinHeight" Value="24"/>
+            <Setter Property="Padding" Value="6,2"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="ItemContainerStyle" Value="{StaticResource ModernComboBoxItem}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <!-- 视觉主体 -->
+                            <Border x:Name="MainBorder"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="0"
+                                    Padding="{TemplateBinding Padding}"
+                                    SnapsToDevicePixels="True">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ContentPresenter Grid.Column="0"
+                                                      Content="{TemplateBinding SelectionBoxItem}"
+                                                      ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                      ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                                      HorizontalAlignment="Left"
+                                                      VerticalAlignment="Center"
+                                                      IsHitTestVisible="False"/>
+                                    <Path Grid.Column="1"
+                                          Data="M 0 0 L 5 5 L 10 0 Z"
+                                          Fill="{TemplateBinding Foreground}"
+                                          VerticalAlignment="Center"
+                                          HorizontalAlignment="Center"
+                                          Width="10" Height="5"
+                                          Stretch="None"
+                                          Margin="8,0,0,0"
+                                          IsHitTestVisible="False"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- 点击层：负责打开/关闭下拉，透明且不占用焦点 -->
+                            <ToggleButton x:Name="ToggleButton"
+                                          Focusable="False"
+                                          Opacity="0"
+                                          ClickMode="Press"
+                                          HorizontalAlignment="Stretch"
+                                          VerticalAlignment="Stretch"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="Transparent"/>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+
+                            <!-- 自定义下拉弹出层 -->
+                            <Popup x:Name="PART_Popup"
+                                   Placement="Bottom"
+                                   PlacementTarget="{Binding ElementName=MainBorder}"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   StaysOpen="False"
+                                   AllowsTransparency="True"
+                                   PopupAnimation="Slide">
+                                <Border Background="{DynamicResource bg-tertiary}"
+                                        BorderBrush="{DynamicResource border-color}"
+                                        BorderThickness="1"
+                                        CornerRadius="0"
+                                        SnapsToDevicePixels="True">
+                                    <ScrollViewer x:Name="DropDownScrollViewer" MaxHeight="200">
+                                        <ItemsPresenter x:Name="ItemsPresenter"
+                                                        KeyboardNavigation.DirectionalNavigation="Contained"
+                                                        SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="MainBorder" Property="BorderBrush" Value="{DynamicResource accent-blue}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                <Setter TargetName="MainBorder" Property="BorderBrush" Value="{DynamicResource accent-blue}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- ══════════════ ?TextBox Style ══════════════ ?-->
         <Style x:Key="ModernTextBox" TargetType="TextBox">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Background" Value="{DynamicResource bg-tertiary}"/>
             <Setter Property="Foreground" Value="{DynamicResource text-primary}"/>
             <Setter Property="BorderBrush" Value="{DynamicResource border-color}"/>
@@ -477,6 +637,7 @@
 
         <!-- ══════════════ 右键管理：内层 TabControl ══════════════ -->
         <Style x:Key="ContextMenuTabControl" TargetType="TabControl">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Padding" Value="0"/>
@@ -497,6 +658,7 @@
         </Style>
 
         <Style x:Key="ContextMenuTabItem" TargetType="TabItem">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="{DynamicResource text-muted}"/>
             <Setter Property="FontSize" Value="13"/>
@@ -526,6 +688,7 @@
 
         <!-- 开关：黑色/深灰=关闭，黄色=开启 -->
         <Style x:Key="ToggleSwitch" TargetType="CheckBox">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Width" Value="36"/>
             <Setter Property="Height" Value="20"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
@@ -635,22 +798,26 @@
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <!-- 顶部工具条：左侧标题+版本，右侧窗口控制按 ?-->
-            <Border Grid.Row="0" Height="38" Background="Transparent"
-                    MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+            <!-- 顶部工具条：左侧 sidebar 色块，标题+版本置于侧栏右侧（内容区上方），右侧窗口控制按 ?
+                 左侧叠一层 sidebar 色块，使左侧菜单栏在视觉上贯穿整个程序高度（含标题栏区域） -->
+            <Border Grid.Row="0" Height="38" Background="Transparent">
                 <Grid>
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="16,0,0,0">
+                    <Border Width="244" HorizontalAlignment="Left" VerticalAlignment="Stretch" Background="{DynamicResource bg-sidebar}"/>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left" Margin="260,0,0,0">
                         <TextBlock Text="九歌・系统清洁小工具" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource text-primary}" VerticalAlignment="Center"/>
                         <TextBlock Text="{Binding VersionSuffix}" FontSize="10" Foreground="{DynamicResource text-muted}" VerticalAlignment="Center" Margin="4,2,0,0"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,6,0">
                         <Button Content="{Binding ThemeIcon}" Command="{Binding ToggleThemeCommand}"
                             Width="34" Height="28" Style="{DynamicResource WindowButton}"
-                            FontSize="14" ToolTip="切换深色 / 浅色模式"/>
+                            FontSize="14" ToolTip="切换深色 / 浅色模式"
+                            WindowChrome.IsHitTestVisibleInChrome="True"/>
                     <Button Content="&#x2014;" Click="Minimize_Click" Width="34" Height="28"
-                            Style="{DynamicResource WindowButton}" FontSize="16"/>
+                            Style="{DynamicResource WindowButton}" FontSize="16"
+                            WindowChrome.IsHitTestVisibleInChrome="True"/>
                     <Button Content="&#x2715;" Click="Close_Click" Width="34" Height="28"
-                            Style="{DynamicResource WindowButton}" FontSize="14"/>
+                            Style="{DynamicResource WindowButton}" FontSize="14"
+                            WindowChrome.IsHitTestVisibleInChrome="True"/>
                 </StackPanel>
                 </Grid>
             </Border>
@@ -781,7 +948,7 @@
                                 <Button Content="&#x91CA;&#x653E;" Command="{Binding FreeMemoryCommand}"
                                         Style="{DynamicResource MiniButton}" HorizontalAlignment="Center"
                                         Margin="0"
-                                        ToolTip="&#x91CA;&#x653E;/&#x6574;&#x7406;&#x7269;&#x7406;&#x5185;&#x5B58;&#xFF0C;&#x964D;&#x4F4E;&#x5185;&#x5B58;&#x5360;&#x7528;"/>
+                                        ToolTip="&#x904D;&#x5386;&#x7CFB;&#x7EDF;&#x6240;&#x6709;&#x8FDB;&#x7A0B;&#x5E76;&#x6E05;&#x7406;&#x5DE5;&#x4F5C;&#x96C6;&#xFF0C;&#x91CA;&#x653E;&#x7CFB;&#x7EDF;&#x6574;&#x4F53;&#x7269;&#x7406;&#x5185;&#x5B58;&#xFF08;&#x975E;&#x4EC5;&#x672C;&#x7A0B;&#x5E8F;&#xFF09;&#x3002;"/>
                                 <TextBlock Text="{Binding ReleaseStatusMessage}" FontSize="11"
                                            Foreground="{DynamicResource accent-green}"
                                            HorizontalAlignment="Center"
@@ -908,8 +1075,9 @@
                     <Border Style="{DynamicResource Card}" Padding="0,12">
                         <StackPanel>
                         <!-- 主卡可展开头部 -->
-                        <Border Background="Transparent" Padding="16,8,16,12" Cursor="Hand"
-                                Tag="GarbageCleanup" MouseLeftButtonDown="GroupHeader_ToggleExpanded">
+                        <Border Style="{DynamicResource GroupHeader}"
+                                Tag="GarbageCleanup" MouseLeftButtonDown="GroupHeader_ToggleExpanded"
+                                BorderThickness="{Binding IsGarbageCleanupExpanded, Converter={StaticResource BoolToBorderThickness}}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -1031,8 +1199,9 @@
                     <Border Style="{DynamicResource Card}" Margin="0,16,0,0" Padding="0,12">
                         <StackPanel>
                             <!-- 系统工具（可展开分组 ?-->
-                            <Border Background="Transparent" Padding="16,8,16,12" Cursor="Hand"
-                                    Tag="SystemTools" MouseLeftButtonDown="GroupHeader_ToggleExpanded">
+                            <Border Style="{DynamicResource GroupHeader}"
+                                    Tag="SystemTools" MouseLeftButtonDown="GroupHeader_ToggleExpanded"
+                                    BorderThickness="{Binding IsSystemToolsExpanded, Converter={StaticResource BoolToBorderThickness}}">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
@@ -1079,10 +1248,10 @@
                                                             <ColumnDefinition Width="*"/>
                                                             <ColumnDefinition Width="Auto"/>
                                                         </Grid.ColumnDefinitions>
-                                                        <!-- 图标圆角底 -->
-                                                        <Border Grid.Column="0" Width="34" Height="34" CornerRadius="9" Background="{DynamicResource bg-item}" Margin="0,0,10,0">
-                                                            <TextBlock Text="{Binding Icon}" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                                                        </Border>
+                                                        <!-- 图标：只显示图标，不带任何底色/背景容器 -->
+                                                        <TextBlock Grid.Column="0" Text="{Binding Icon}" FontSize="17"
+                                                                   Width="34" Height="34" Margin="0,0,10,0"
+                                                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
                                                             <TextBlock Text="{Binding Name}" FontSize="12.5" FontWeight="SemiBold" Foreground="{DynamicResource text-primary}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                                                             <Border Background="{DynamicResource bg-item}" CornerRadius="4" Padding="5,1.5" Margin="8,0,0,0">
@@ -1104,7 +1273,8 @@
                                                                     </MultiBinding>
                                                                 </Button.IsEnabled>
                                                             </Button>
-                                                            <Button Content="&#x6267;&#x884C;" Command="{Binding Command}" Style="{DynamicResource MiniButton}" Margin="8,0,0,0">
+                                                            <Button Content="&#x6267;&#x884C;" Command="{Binding Command}" Style="{DynamicResource MiniButton}" Margin="8,0,0,0"
+                                                                    Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}, ConverterParameter=inverted}">
                                                                 <Button.IsEnabled>
                                                                     <MultiBinding Converter="{StaticResource AdminLockEnabled}">
                                                                         <Binding Path="RequiresAdmin"/>
@@ -1112,34 +1282,34 @@
                                                                     </MultiBinding>
                                                                 </Button.IsEnabled>
                                                             </Button>
+                                                            <Button Content="&#x505C;&#x6B62;" Command="{Binding CancelCommand}" Style="{DynamicResource MiniButton}" Margin="8,0,0,0"
+                                                                    Foreground="{DynamicResource accent-red}"
+                                                                    Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}"/>
                                                         </StackPanel>
                                                     </Grid>
                                                     <!-- 说明 -->
                                                     <TextBlock Text="{Binding Detail}" FontSize="10.5" Foreground="{DynamicResource text-muted}" Margin="44,6,0,0" TextWrapping="Wrap" LineHeight="15" Visibility="{Binding Detail, Converter={StaticResource StringToVisibility}}"/>
-                                                    <!-- 进度条 + 百分比读数（仅确定态显示数字） -->
-                                                    <Grid Margin="44,8,0,0" Visibility="{Binding InlineProgressVisible, Converter={StaticResource BoolToVisibility}}">
-                                                        <Grid.ColumnDefinitions>
-                                                            <ColumnDefinition Width="*"/>
-                                                            <ColumnDefinition Width="Auto"/>
-                                                        </Grid.ColumnDefinitions>
-                                                        <ProgressBar Grid.Column="0" Style="{DynamicResource RoundedProgress}" Value="{Binding ProgressValue}" Maximum="100" IsIndeterminate="{Binding IsIndeterminate}" Height="6" Foreground="{DynamicResource accent-blue}" Background="{DynamicResource bg-tertiary}"/>
-                                                        <TextBlock Grid.Column="1" Margin="8,0,0,0" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource text-secondary}" VerticalAlignment="Center">
-                                                            <TextBlock.Style>
-                                                                <Style TargetType="TextBlock">
-                                                                    <Setter Property="Text" Value="{Binding ProgressValue, StringFormat={}{0:0}%}"/>
-                                                                    <Setter Property="Visibility" Value="Visible"/>
-                                                                    <Style.Triggers>
-                                                                        <DataTrigger Binding="{Binding IsIndeterminate}" Value="True">
-                                                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                                                        </DataTrigger>
-                                                                    </Style.Triggers>
-                                                                </Style>
-                                                            </TextBlock.Style>
-                                                        </TextBlock>
-                                                    </Grid>
-                                                    <!-- 状态文字 -->
-                                                    <Border Background="{DynamicResource bg-item}" CornerRadius="6" Margin="44,6,0,0" Padding="8,5" Visibility="{Binding StatusText, Converter={StaticResource StringToVisibility}}">
-                                                        <TextBlock Text="{Binding StatusText}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource accent-blue}" TextWrapping="Wrap"/>
+                                                    <!-- 实时执行输出（执行窗口，运行中展开，可滚动；右上角 × 可收起） -->
+                                                    <Border Background="{DynamicResource bg-tertiary}" CornerRadius="6" Margin="44,6,0,0" Padding="10,8" Visibility="{Binding HasOutput, Converter={StaticResource BoolToVisibility}}">
+                                                        <StackPanel>
+                                                            <Grid Margin="0,0,0,6">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*"/>
+                                                                    <ColumnDefinition Width="Auto"/>
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Grid.Column="0" Text="执行输出" FontSize="10.5" FontWeight="SemiBold" Foreground="{DynamicResource text-muted}" VerticalAlignment="Center"/>
+                                                                <Button Grid.Column="1" Content="&#x2715;" Command="{Binding ClearCommand}" Style="{DynamicResource MiniButton}" ToolTip="关闭输出" Padding="6,2" FontSize="11"/>
+                                                            </Grid>
+                                                            <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto">
+                                                                <ItemsControl ItemsSource="{Binding OutputLines}">
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate>
+                                                                            <TextBlock Text="{Binding}" FontFamily="Consolas" FontSize="11" Foreground="{DynamicResource text-secondary}" TextWrapping="Wrap" LineHeight="16" Margin="0,1"/>
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                            </ScrollViewer>
+                                                        </StackPanel>
                                                     </Border>
                                                 </StackPanel>
                                             </Border>
@@ -1153,8 +1323,9 @@
                     <!-- Empty Folders (collapsible) -->
                     <Border Style="{DynamicResource Card}" Margin="0,16,0,0" Padding="0,12">
                         <StackPanel>
-                            <Border Background="Transparent" Padding="16,8,16,12" Cursor="Hand"
-                                    Tag="EmptyFolder" MouseLeftButtonDown="GroupHeader_ToggleExpanded">
+                            <Border Style="{DynamicResource GroupHeader}"
+                                    Tag="EmptyFolder" MouseLeftButtonDown="GroupHeader_ToggleExpanded"
+                                    BorderThickness="{Binding IsEmptyFolderExpanded, Converter={StaticResource BoolToBorderThickness}}">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
@@ -1177,7 +1348,7 @@
                             </Border>
 
                             <!-- 空文件夹扫描内容（可折叠 ?-->
-                            <StackPanel Margin="16,0,16,4">
+                            <StackPanel Margin="16,8,16,4">
                                 <StackPanel.Style>
                                     <Style TargetType="StackPanel">
                                         <Setter Property="Visibility" Value="Visible"/>
@@ -1207,11 +1378,6 @@
                                          Background="{DynamicResource bg-item}" BorderThickness="0" Padding="10,8"
                                          TextWrapping="NoWrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"
                                          MaxHeight="220"/>
-                                <Border Background="{DynamicResource bg-item}" CornerRadius="6" Margin="0,8,0,0" Padding="8,5"
-                                        Visibility="{Binding EmptyFolderStatusText, Converter={StaticResource StringToVisibility}}">
-                                    <TextBlock Text="{Binding EmptyFolderStatusText}" FontSize="11" FontWeight="SemiBold"
-                                               Foreground="{DynamicResource accent-blue}" TextWrapping="Wrap"/>
-                                </Border>
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -1230,17 +1396,18 @@
             <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{DynamicResource bg-primary}">
                 <StackPanel Style="{DynamicResource ContentRoot}">
 
-                    <!-- 文件夹搬迁 -->
+                    <!-- 用户文件夹迁移 -->
                     <Border Style="{DynamicResource Card}" Margin="0,0,0,20" Padding="0,12">
                             <StackPanel>
-                                <Border Background="Transparent" Padding="16,8,16,12" Cursor="Hand"
-                                        Tag="FolderMigration" MouseLeftButtonDown="GroupHeader_ToggleExpanded">
+                                <Border Style="{DynamicResource GroupHeader}"
+                                        Tag="FolderMigration" MouseLeftButtonDown="GroupHeader_ToggleExpanded"
+                                        BorderThickness="{Binding IsFolderMigrationExpanded, Converter={StaticResource BoolToBorderThickness}}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="&#x6587;&#x4EF6;&#x5939;&#x642C;&#x8FC1;" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource text-primary}" VerticalAlignment="Center"/>
+                                        <TextBlock Grid.Column="0" Text="&#x7528;&#x6237;&#x6587;&#x4EF6;&#x5939;&#x8FC1;&#x79FB;" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource text-primary}" VerticalAlignment="Center"/>
                                         <TextBlock Grid.Column="1" FontSize="10" Foreground="{DynamicResource text-muted}" VerticalAlignment="Center">
                                             <TextBlock.Style>
                                                 <Style TargetType="TextBlock">
@@ -1256,8 +1423,8 @@
                                     </Grid>
                                 </Border>
 
-                                <!-- 文件夹搬迁内容（可折叠） -->
-                                <StackPanel Margin="16,0,16,4">
+                                <!-- 用户文件夹迁移内容（可折叠） -->
+                                <StackPanel Margin="16,8,16,4">
                                     <StackPanel.Style>
                                         <Style TargetType="StackPanel">
                                             <Setter Property="Visibility" Value="Visible"/>
@@ -1388,8 +1555,9 @@
                         <!-- 系统文件 / HOSTS -->
                         <Border Style="{DynamicResource Card}" Margin="0,0,0,20" Padding="0,12">
                             <StackPanel>
-                                <Border Background="Transparent" Padding="16,8,16,12" Cursor="Hand"
-                                        Tag="Hosts" MouseLeftButtonDown="GroupHeader_ToggleExpanded">
+                                <Border Style="{DynamicResource GroupHeader}"
+                                        Tag="Hosts" MouseLeftButtonDown="GroupHeader_ToggleExpanded"
+                                        BorderThickness="{Binding IsHostsExpanded, Converter={StaticResource BoolToBorderThickness}}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1410,7 +1578,7 @@
                                         </TextBlock>
                                     </Grid>
                                 </Border>
-                                <StackPanel Margin="16,0,16,4">
+                                <StackPanel Margin="16,8,16,4">
                                     <StackPanel.Style>
                                         <Style TargetType="StackPanel">
                                             <Setter Property="Visibility" Value="Visible"/>
@@ -1426,7 +1594,7 @@
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0" Text="&#x4FEE;&#x6539;&#x8D1F;&#x8D23;&#x57DF;&#x540D;&#x5FEB;&#x901F;&#x89E3;&#x6790;&#x7684;&#x6587;&#x4EF6;&#xFF0C;&#x4F7F;&#x7528;&#x8BB0;&#x4E8B;&#x672C;&#x6253;&#x5F00;&#xFF0C;&#x53EF;&#x76F4;&#x63A5;&#x4FDD;&#x5B58;&#x4FEE;&#x6539;" FontSize="11" Foreground="{DynamicResource text-muted}" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                                        <TextBlock Grid.Column="0" Text="&#x4FEE;&#x6539;&#x8D1F;&#x8D23;&#x57DF;&#x540D;&#x5FEB;&#x901F;&#x89E3;&#x6790;&#x7684;&#x6587;&#x4EF6;&#xFF0C;&#x4F7F;&#x7528;&#x8BB0;&#x4E8B;&#x672C;&#x6253;&#x5F00;&#xFF0C;&#x53EF;&#x76F4;&#x63A5;&#x4FDD;&#x5B58;&#x4FEE;&#x6539;" FontSize="12" Foreground="{DynamicResource text-muted}" TextWrapping="Wrap"/>
                                         <Button Grid.Column="1" Content="&#x1F4C4; &#x6253;&#x5F00; HOSTS" Command="{Binding OpenHostsFileCommand}" Style="{DynamicResource SecondaryButton}" VerticalAlignment="Center" FontSize="11" Margin="12,0,0,0"/>
                                     </Grid>
                                 </StackPanel>
@@ -1436,8 +1604,9 @@
                         <!-- UAC 通知管理 -->
                         <Border Style="{DynamicResource Card}" Margin="0,0,0,20" Padding="0,12">
                             <StackPanel>
-                                <Border Background="Transparent" Padding="16,8,16,12" Cursor="Hand"
-                                        Tag="Uac" MouseLeftButtonDown="GroupHeader_ToggleExpanded">
+                                <Border Style="{DynamicResource GroupHeader}"
+                                        Tag="Uac" MouseLeftButtonDown="GroupHeader_ToggleExpanded"
+                                        BorderThickness="{Binding IsUacExpanded, Converter={StaticResource BoolToBorderThickness}}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1458,7 +1627,7 @@
                                         </TextBlock>
                                     </Grid>
                                 </Border>
-                                <StackPanel Margin="16,0,16,4">
+                                <StackPanel Margin="16,8,16,4">
                                     <StackPanel.Style>
                                         <Style TargetType="StackPanel">
                                             <Setter Property="Visibility" Value="Visible"/>
@@ -1469,8 +1638,8 @@
                                             </Style.Triggers>
                                         </Style>
                                     </StackPanel.Style>
-                                    <TextBlock Text="&#x8C03;&#x6574;&#x7528;&#x6237;&#x8D26;&#x6237;&#x63A7;&#x5236;&#xFF08;UAC&#xFF09;&#x7684;&#x901A;&#x77E5;&#x7EA7;&#x522B;&#x3002;&#x964D;&#x4F4E;&#x7EA7;&#x522B;&#x53EF;&#x51CF;&#x5C11;&#x5F39;&#x7A97;&#xFF0C;&#x4F46;&#x4F1A;&#x964D;&#x4F4E;&#x7CFB;&#x7EDF;&#x5B89;&#x5168;&#x6027;&#x3002;&#x9009;&#x62E9;&#x201C;&#x4ECE;&#x4E0D;&#x901A;&#x77E5;&#x201D;&#x5373;&#x7B49;&#x6548;&#x5173;&#x95ED; UAC&#x3002;" FontSize="11" Foreground="{DynamicResource text-muted}" TextWrapping="Wrap" Margin="0,0,0,10"/>
-                                    <ComboBox SelectedIndex="{Binding UacLevelIndex, Mode=TwoWay}" Margin="0,0,0,4">
+                                    <TextBlock Text="&#x8C03;&#x6574;&#x7528;&#x6237;&#x8D26;&#x6237;&#x63A7;&#x5236;&#xFF08;UAC&#xFF09;&#x7684;&#x901A;&#x77E5;&#x7EA7;&#x522B;&#x3002;&#x964D;&#x4F4E;&#x7EA7;&#x522B;&#x53EF;&#x51CF;&#x5C11;&#x5F39;&#x7A97;&#xFF0C;&#x4F46;&#x4F1A;&#x964D;&#x4F4E;&#x7CFB;&#x7EDF;&#x5B89;&#x5168;&#x6027;&#x3002;&#x9009;&#x62E9;&#x201C;&#x4ECE;&#x4E0D;&#x901A;&#x77E5;&#x201D;&#x5373;&#x7B49;&#x6548;&#x5173;&#x95ED; UAC&#x3002;" FontSize="12" Foreground="{DynamicResource text-muted}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <ComboBox SelectedIndex="{Binding UacLevelIndex, Mode=TwoWay}" Margin="0,0,0,4" Style="{DynamicResource ModernComboBox}" Width="220" HorizontalAlignment="Left">
                                         <ComboBoxItem Content="&#x59CB;&#x7EC8;&#x901A;&#x77E5;&#xFF08;&#x6700;&#x5B89;&#x5168;&#xFF09;"/>
                                         <ComboBoxItem Content="&#x4EC5;&#x5728;&#x5E94;&#x7528;&#x5C1D;&#x8BD5;&#x66F4;&#x6539;&#x65F6;&#x901A;&#x77E5;&#xFF08;&#x9ED8;&#x8BA4;&#xFF09;"/>
                                         <ComboBoxItem Content="&#x4EC5;&#x5728;&#x5E94;&#x7528;&#x5C1D;&#x8BD5;&#x66F4;&#x6539;&#x65F6;&#x901A;&#x77E5;&#xFF08;&#x4E0D;&#x6697;&#x5316;&#x684C;&#x9762;&#xFF09;"/>
@@ -1479,7 +1648,7 @@
 
                                     <TextBlock Text="SmartScreen &#x7B5B;&#x9009;&#x5668;" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource text-primary}" Margin="0,12,0,4"/>
                                     <CheckBox Content="&#x542F;&#x7528; SmartScreen &#x7B5B;&#x9009;&#x5668;" IsChecked="{Binding SmartScreenEnabled}" Style="{DynamicResource ModernCheckBox}" Margin="0,0,0,8"/>
-                                    <TextBlock Text="&#x5173;&#x95ED; SmartScreen &#x4F1A;&#x663E;&#x8457;&#x589E;&#x52A0;&#x7535;&#x8111;&#x611F;&#x67D3;&#x75C5;&#x6BD2;&#x6216;&#x906D;&#x53D7;&#x7F51;&#x7EDC;&#x653B;&#x51FB;&#x7684;&#x98CE;&#x9669;&#x3002;" FontSize="11" Foreground="{DynamicResource accent-yellow}" TextWrapping="Wrap"/>
+                                    <TextBlock Text="&#x5173;&#x95ED; SmartScreen &#x4F1A;&#x663E;&#x8457;&#x589E;&#x52A0;&#x7535;&#x8111;&#x611F;&#x67D3;&#x75C5;&#x6BD2;&#x6216;&#x906D;&#x53D7;&#x7F51;&#x7EDC;&#x653B;&#x51FB;&#x7684;&#x98CE;&#x9669;&#x3002;" FontSize="12" Foreground="{DynamicResource accent-yellow}" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </StackPanel>
                         </Border>
@@ -1487,8 +1656,9 @@
                         <!-- 任务栏与开始菜单 -->
                         <Border Style="{DynamicResource Card}" Margin="0,0,0,20" Padding="0,12">
                             <StackPanel>
-                                <Border Background="Transparent" Padding="16,8,16,12" Cursor="Hand"
-                                        Tag="Taskbar" MouseLeftButtonDown="GroupHeader_ToggleExpanded">
+                                <Border Style="{DynamicResource GroupHeader}"
+                                        Tag="Taskbar" MouseLeftButtonDown="GroupHeader_ToggleExpanded"
+                                        BorderThickness="{Binding IsTaskbarExpanded, Converter={StaticResource BoolToBorderThickness}}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1509,7 +1679,7 @@
                                         </TextBlock>
                                     </Grid>
                                 </Border>
-                                <StackPanel Margin="16,0,16,4">
+                                <StackPanel Margin="16,8,16,4">
                                     <StackPanel.Style>
                                         <Style TargetType="StackPanel">
                                             <Setter Property="Visibility" Value="Visible"/>
@@ -1521,7 +1691,7 @@
                                         </Style>
                                     </StackPanel.Style>
                                     <TextBlock Text="&#x4EFB;&#x52A1;&#x680F;&#x5408;&#x5E76;&#x65B9;&#x5F0F;" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource text-primary}" Margin="0,0,0,4"/>
-                                    <ComboBox SelectedIndex="{Binding TaskbarGlom, Mode=TwoWay}" Margin="0,0,0,16">
+                                    <ComboBox SelectedIndex="{Binding TaskbarGlom, Mode=TwoWay}" Margin="0,0,0,16" Style="{DynamicResource ModernComboBox}" Width="220" HorizontalAlignment="Left">
                                         <ComboBoxItem Content="&#x59CB;&#x7EC8;&#x5408;&#x5E76;"/>
                                         <ComboBoxItem Content="&#x586B;&#x6EE1;&#x65F6;&#x5408;&#x5E76;"/>
                                         <ComboBoxItem Content="&#x4ECE;&#x4E0D;&#x5408;&#x5E76;"/>
@@ -1534,8 +1704,9 @@
                         <!-- 桌面图标管理 -->
                         <Border Style="{DynamicResource Card}" Margin="0,0,0,20" Padding="0,12">
                             <StackPanel>
-                                <Border Background="Transparent" Padding="16,8,16,12" Cursor="Hand"
-                                        Tag="DesktopIcons" MouseLeftButtonDown="GroupHeader_ToggleExpanded">
+                                <Border Style="{DynamicResource GroupHeader}"
+                                        Tag="DesktopIcons" MouseLeftButtonDown="GroupHeader_ToggleExpanded"
+                                        BorderThickness="{Binding IsDesktopIconsExpanded, Converter={StaticResource BoolToBorderThickness}}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1556,7 +1727,7 @@
                                         </TextBlock>
                                     </Grid>
                                 </Border>
-                                <StackPanel Margin="16,0,16,4">
+                                <StackPanel Margin="16,8,16,4">
                                     <StackPanel.Style>
                                         <Style TargetType="StackPanel">
                                             <Setter Property="Visibility" Value="Visible"/>
@@ -1567,7 +1738,7 @@
                                             </Style.Triggers>
                                         </Style>
                                     </StackPanel.Style>
-                                    <TextBlock Text="&#x52FE;&#x9009;&#x540E;&#xFF0C;&#x5BF9;&#x5E94;&#x56FE;&#x6807;&#x4F1A;&#x663E;&#x793A;&#x5728;&#x684C;&#x9762;&#x4E0A;&#xFF1B;&#x53D6;&#x6D88;&#x52FE;&#x9009;&#x5219;&#x9690;&#x85CF;&#x3002;" FontSize="11" Foreground="{DynamicResource text-muted}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <TextBlock Text="&#x52FE;&#x9009;&#x540E;&#xFF0C;&#x5BF9;&#x5E94;&#x56FE;&#x6807;&#x4F1A;&#x663E;&#x793A;&#x5728;&#x684C;&#x9762;&#x4E0A;&#xFF1B;&#x53D6;&#x6D88;&#x52FE;&#x9009;&#x5219;&#x9690;&#x85CF;&#x3002;" FontSize="12" Foreground="{DynamicResource text-muted}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                                     <CheckBox Content="&#x6B64;&#x7535;&#x8111;" IsChecked="{Binding DesktopIconThisPC}" Style="{DynamicResource ModernCheckBox}" Margin="0,0,0,8"/>
                                     <CheckBox Content="&#x56DE;&#x6536;&#x7AD9;" IsChecked="{Binding DesktopIconRecycleBin}" Style="{DynamicResource ModernCheckBox}" Margin="0,0,0,8"/>
                                     <CheckBox Content="&#x7F51;&#x7EDC;" IsChecked="{Binding DesktopIconNetwork}" Style="{DynamicResource ModernCheckBox}" Margin="0,0,0,8"/>
@@ -1580,8 +1751,9 @@
                         <!-- 文件资源管理器 -->
                         <Border Style="{DynamicResource Card}" Margin="0,0,0,20" Padding="0,12">
                             <StackPanel>
-                                <Border Background="Transparent" Padding="16,8,16,12" Cursor="Hand"
-                                        Tag="Explorer" MouseLeftButtonDown="GroupHeader_ToggleExpanded">
+                                <Border Style="{DynamicResource GroupHeader}"
+                                        Tag="Explorer" MouseLeftButtonDown="GroupHeader_ToggleExpanded"
+                                        BorderThickness="{Binding IsExplorerExpanded, Converter={StaticResource BoolToBorderThickness}}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1602,7 +1774,7 @@
                                         </TextBlock>
                                     </Grid>
                                 </Border>
-                                <StackPanel Margin="16,0,16,4">
+                                <StackPanel Margin="16,8,16,4">
                                     <StackPanel.Style>
                                         <Style TargetType="StackPanel">
                                             <Setter Property="Visibility" Value="Visible"/>
@@ -1623,8 +1795,9 @@
                         <!-- 记事本设置 -->
                         <Border Style="{DynamicResource Card}" Margin="0,0,0,20" Padding="0,12">
                             <StackPanel>
-                                <Border Background="Transparent" Padding="16,8,16,12" Cursor="Hand"
-                                        Tag="Notepad" MouseLeftButtonDown="GroupHeader_ToggleExpanded">
+                                <Border Style="{DynamicResource GroupHeader}"
+                                        Tag="Notepad" MouseLeftButtonDown="GroupHeader_ToggleExpanded"
+                                        BorderThickness="{Binding IsNotepadExpanded, Converter={StaticResource BoolToBorderThickness}}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -1645,7 +1818,7 @@
                                         </TextBlock>
                                     </Grid>
                                 </Border>
-                                <StackPanel Margin="16,0,16,4">
+                                <StackPanel Margin="16,8,16,4">
                                     <StackPanel.Style>
                                         <Style TargetType="StackPanel">
                                             <Setter Property="Visibility" Value="Visible"/>
@@ -1656,8 +1829,22 @@
                                             </Style.Triggers>
                                         </Style>
                                     </StackPanel.Style>
-                                    <CheckBox Content="&#x5728;&#x65B0;&#x9009;&#x9879;&#x5361;&#x4E2D;&#x6253;&#x5F00;&#x6587;&#x4EF6;" IsChecked="{Binding NotepadOpenInNewTab}" Style="{DynamicResource ModernCheckBox}" Margin="0,0,0,8"/>
-                                    <CheckBox Content="&#x542F;&#x52A8;&#x65B0;&#x4F1A;&#x8BDD;&#x5E76;&#x653E;&#x5F03;&#x672A;&#x4FDD;&#x5B58;&#x7684;&#x66F4;&#x6539;" IsChecked="{Binding NotepadNewSession}" Style="{DynamicResource ModernCheckBox}"/>
+                                    <!-- 打开文件 -->
+                                    <StackPanel Margin="0,0,0,12">
+                                        <TextBlock Text="打开文件" FontSize="12" Foreground="{DynamicResource text-primary}" Margin="0,0,0,4"/>
+                                        <ComboBox SelectedIndex="{Binding NotepadOpenInNewTabIndex, Mode=TwoWay}" Style="{DynamicResource ModernComboBox}" Width="220" HorizontalAlignment="Left">
+                                            <ComboBoxItem Content="&#x5728;&#x65B0;&#x9009;&#x9879;&#x5361;&#x4E2D;&#x6253;&#x5F00;"/>
+                                            <ComboBoxItem Content="&#x5728;&#x65B0;&#x7A97;&#x53E3;&#x4E2D;&#x6253;&#x5F00;"/>
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <!-- 记事本启动时 -->
+                                    <StackPanel>
+                                        <TextBlock Text="记事本启动时" FontSize="12" Foreground="{DynamicResource text-primary}" Margin="0,0,0,4"/>
+                                        <ComboBox SelectedIndex="{Binding NotepadNewSessionIndex, Mode=TwoWay}" Style="{DynamicResource ModernComboBox}" Width="220" HorizontalAlignment="Left">
+                                            <ComboBoxItem Content="&#x542F;&#x52A8;&#x65B0;&#x4F1A;&#x8BDD;&#x5E76;&#x653E;&#x5F03;&#x672A;&#x4FDD;&#x5B58;&#x7684;&#x66F4;&#x6539;"/>
+                                            <ComboBoxItem Content="&#x7EE7;&#x7EED;&#x4E0A;&#x4E00;&#x4E2A;&#x4F1A;&#x8BDD;"/>
+                                        </ComboBox>
+                                    </StackPanel>
                                 </StackPanel>
                             </StackPanel>
                         </Border>
@@ -1752,7 +1939,26 @@
                                 <TextBlock Text="九歌・系统清洁小工具" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource text-primary}"/>
                                 <TextBlock Text="{Binding VersionSuffix}" FontSize="13" Foreground="{DynamicResource text-muted}" VerticalAlignment="Center" Margin="6,0,0,0"/>
                             </StackPanel>
-                            <TextBlock Text="九歌・系统清洁小工具是一款面向 Windows 10/11 的系统清理与优化工具，提供垃圾清理、注册表清理、极限清理、右键菜单管理、空间分析、系统监控与系统设置等功能，帮助用户释放磁盘空间、优化系统状态。所有删除操作均先移入回收站，误删可随时恢复。" FontSize="12" Foreground="{DynamicResource text-secondary}" TextWrapping="Wrap"/>
+                            <TextBlock Text="面向 Windows 10 / 11 的轻量系统清理与优化工具，采用 WPF + MVVM 架构，全部调用 Windows 原生 API（零 WMI 依赖），启动快、体积小。" FontSize="12" Foreground="{DynamicResource text-secondary}" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                            <!-- 菜单说明 -->
+                            <TextBlock Text="菜单说明" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource text-primary}" Margin="0,0,0,8"/>
+                            <StackPanel>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource text-secondary}" TextWrapping="Wrap" Margin="0,0,0,6">
+                                    <Run Text="仪表盘" FontWeight="Bold" Foreground="{DynamicResource text-primary}"/><Run Text="：系统信息、性能监控（CPU / 内存 / GPU 实时占用，可一键释放内存）、磁盘空间概览。"/>
+                                </TextBlock>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource text-secondary}" TextWrapping="Wrap" Margin="0,0,0,6">
+                                    <Run Text="深度清理" FontWeight="Bold" Foreground="{DynamicResource text-primary}"/><Run Text="：垃圾清理（50+ 项，安全 / 谨慎分级）、极限清理（关闭休眠、系统修复、DISM 组件清理等系统工具）、空文件夹扫描。"/>
+                                </TextBlock>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource text-secondary}" TextWrapping="Wrap" Margin="0,0,0,6">
+                                    <Run Text="系统设置" FontWeight="Bold" Foreground="{DynamicResource text-primary}"/><Run Text="：UAC / SmartScreen、任务栏与开始菜单、桌面图标、文件资源管理器、记事本、用户文件夹迁移、HOSTS 文件。"/>
+                                </TextBlock>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource text-secondary}" TextWrapping="Wrap" Margin="0,0,0,6">
+                                    <Run Text="右键管理" FontWeight="Bold" Foreground="{DynamicResource text-primary}"/><Run Text="：文件右键、桌面右键、右键新建菜单的禁用 / 启用 / 删除。"/>
+                                </TextBlock>
+                            </StackPanel>
+
+                            <TextBlock Text="提示：垃圾清理默认直接删除（不进回收站），谨慎级项目需二次确认；清理、删除、搬迁等操作具有一定风险，请谨慎使用。" FontSize="11" Foreground="{DynamicResource text-muted}" TextWrapping="Wrap" Margin="0,12,0,0"/>
 
                             <!-- 分割线 -->
                             <Border Height="1" Background="{DynamicResource text-muted}" Opacity="0.2" Margin="0,14"/>

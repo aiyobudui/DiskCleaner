@@ -1,10 +1,10 @@
-using DiskCleaner.ViewModels;
+﻿using DiskCleaner.ViewModels;
 
 namespace DiskCleaner.Models
 {
-    /// <summary>
-    /// 用户已知文件夹信息 (桌面/文档/下载/图片/音乐/视频)
-    /// </summary>
+    
+    
+    
     public class UserFolderInfo : ViewModelBase
     {
         public string Name { get; set; }
@@ -53,7 +53,7 @@ namespace DiskCleaner.Models
             set => SetProperty(ref _statusText, value);
         }
 
-        /// <summary>当前路径是否已偏离默认路径 (即已被重定向)</summary>
+        
         public bool IsRedirected => !string.Equals(CurrentPath, DefaultPath, System.StringComparison.OrdinalIgnoreCase);
     }
 }

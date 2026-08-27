@@ -3,5 +3,9 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="Views/MainWindow.xaml">
     <Application.Resources>
+        <!-- 全局禁用焦点虚线框：按 Alt 键或键盘导航时不再显示默认虚线矩形 -->
+        <Style TargetType="Control">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        </Style>
     </Application.Resources>
 </Application>

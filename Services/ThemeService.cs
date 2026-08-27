@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Windows;
@@ -6,18 +6,18 @@ using System.Windows.Media;
 
 namespace DiskCleaner.Services
 {
-    /// <summary>
-    /// 主题服务：在深色 / 浅色两套画刷颜色之间切换。
-    /// 切换时通过修改 Window.Resources 中对应 SolidColorBrush 的 Color 实现，
-    /// 所有以 DynamicResource 引用这些画刷的控件会自动刷新。
-    /// </summary>
+    
+    
+    
+    
+    
     public static class ThemeService
     {
         private const string ThemeFileName = "theme.txt";
         private static readonly string ThemeDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DiskCleaner");
 
-        // 深色模式（与 MainWindow.xaml 中 Window.Resources 默认定义一致）
+        
         private static readonly Dictionary<string, string> Dark = new()
         {
             ["bg-primary"] = "#1E1E2E",
@@ -38,36 +38,47 @@ namespace DiskCleaner.Services
             ["accent-peach"] = "#FAB387",
             ["accent-mauve"] = "#CBA6F7",
             ["accent-teal"] = "#94E2D5",
-            ["text-on-accent"] = "#FFFFFF",
+            ["text-on-accent"] = "#1E1E2E",
         };
 
-        // 浅色模式：浅灰 / 白底、深色文字、高对比强调色（避免 pastel 色在浅底上看不清）
+        
+        // 浅色模式：整体再压暗一档（用户反馈仍太亮），用「冷灰」而非柔白；
+        // 文本色保持深黑灰，确保在更深的背景上对比度更高、不刺眼。
         private static readonly Dictionary<string, string> Light = new()
         {
-            ["bg-primary"] = "#EFF1F5",
-            ["bg-secondary"] = "#FFFFFF",
-            ["bg-tertiary"] = "#E6E9EF",
-            ["bg-sidebar"] = "#E6E9EF",
-            ["bg-deep"] = "#F5F7FA",
-            ["bg-item"] = "#FAFBFC",
-            ["bg-item-hover"] = "#E9EDF4",
-            ["text-primary"] = "#2E3440",
-            ["text-secondary"] = "#4C566A",
-            ["text-muted"] = "#5C6370",
-            ["border-color"] = "#C7CDD8",
+            ["bg-primary"] = "#CDD2DB",
+            ["bg-secondary"] = "#D8DEE7",
+            ["bg-tertiary"] = "#C5CBD6",
+            ["bg-sidebar"] = "#C8CED8",
+            ["bg-deep"] = "#D8DEE7",
+            ["bg-item"] = "#D2D8E2",
+            ["bg-item-hover"] = "#C3CAD5",
+            ["text-primary"] = "#1F2430",
+            ["text-secondary"] = "#363E4C",
+            ["text-muted"] = "#4A5160",
+            ["border-color"] = "#BFC6D0",
             ["accent-blue"] = "#1E66F5",
-            ["accent-green"] = "#40A02B",
-            ["accent-yellow"] = "#DF8E1D",
-            ["accent-red"] = "#D20F39",
-            ["accent-peach"] = "#FE640B",
-            ["accent-mauve"] = "#8839EF",
-            ["accent-teal"] = "#179299",
-            ["text-on-accent"] = "#1E1E2E",
+            ["accent-green"] = "#2E7D32",
+            ["accent-yellow"] = "#B86E00",
+            ["accent-red"] = "#C20F33",
+            ["accent-peach"] = "#E2550A",
+            ["accent-mauve"] = "#7B2FE0",
+            ["accent-teal"] = "#11807A",
+            ["text-on-accent"] = "#FFFFFF",
         };
 
         private static bool _isLight;
 
         public static bool IsLight => _isLight;
+
+        /// <summary>
+        /// 获取当前主题下指定键的十六进制颜色值（深/浅色自动切换）。
+        /// </summary>
+        public static string GetColor(string key)
+        {
+            var map = _isLight ? Light : Dark;
+            return map.TryGetValue(key, out var value) ? value : null;
+        }
 
         static ThemeService()
         {
@@ -77,39 +88,48 @@ namespace DiskCleaner.Services
                 if (File.Exists(file))
                     _isLight = string.Equals(File.ReadAllText(file).Trim(), "light", StringComparison.OrdinalIgnoreCase);
             }
-            catch { /* 读取失败则保持默认深色 */ }
+            catch {   }
         }
 
-        /// <summary>
-        /// 将当前主题的颜色应用到给定的资源字典（如 MainWindow.Resources）。
-        /// 如果画刷已被冻结（只读），则克隆一份未冻结的画刷并替换字典中的值。
-        /// </summary>
+        
+        
+        
+        
         public static void ApplyTo(ResourceDictionary dict)
         {
             if (dict == null) return;
             var map = _isLight ? Light : Dark;
             foreach (var kv in map)
             {
-                if (!dict.Contains(kv.Key)) continue;
-                if (dict[kv.Key] is not SolidColorBrush brush) continue;
-
                 var newColor = (Color)ColorConverter.ConvertFromString(kv.Value);
-                if (brush.IsFrozen)
+
+                if (dict.Contains(kv.Key))
                 {
-                    var newBrush = brush.Clone();
-                    newBrush.Color = newColor;
-                    dict[kv.Key] = newBrush;
+                    if (dict[kv.Key] is not SolidColorBrush brush) continue;
+
+                    if (brush.IsFrozen)
+                    {
+                        var newBrush = brush.Clone();
+                        newBrush.Color = newColor;
+                        dict[kv.Key] = newBrush;
+                    }
+                    else
+                    {
+                        brush.Color = newColor;
+                    }
                 }
                 else
                 {
-                    brush.Color = newColor;
+                    // 窗口未在自身 Resources 声明该画刷时，直接注入主题画刷，
+                    // 保证深/浅色对所有 DynamicResource 引用全覆盖（避免回退到默认色导致浅色下看不清）。
+                    dict[kv.Key] = new SolidColorBrush(newColor);
                 }
             }
         }
 
-        /// <summary>
-        /// 切换主题并持久化选择。
-        /// </summary>
+        
+        
+        
         public static void Toggle()
         {
             _isLight = !_isLight;
@@ -118,7 +138,7 @@ namespace DiskCleaner.Services
                 Directory.CreateDirectory(ThemeDir);
                 File.WriteAllText(Path.Combine(ThemeDir, ThemeFileName), _isLight ? "light" : "dark");
             }
-            catch { /* 持久化失败不影响本次切换 */ }
+            catch {   }
         }
     }
 }

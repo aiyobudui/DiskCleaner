@@ -1,4 +1,4 @@
-using DiskCleaner.Models;
+﻿using DiskCleaner.Models;
 using DiskCleaner.Services;
 using System;
 using System.Collections.ObjectModel;
@@ -11,16 +11,16 @@ using System.Windows.Input;
 
 namespace DiskCleaner.ViewModels
 {
-    /// <summary>
-    /// 仪表盘标签页：系统信息卡片、性能监控仪表、磁盘空间卡片。
-    /// 直接调用共享核心中的服务与工具方法。
-    /// </summary>
+    
+    
+    
+    
     public partial class MainViewModel : ViewModelBase
     {
-        // ---------- 集合 ----------
+        
         private ObservableCollection<DriveCardInfo> _driveCards = new();
 
-        // ---------- 系统信息 ----------
+        
         private string _systemVersion = "检测中...";
         private string _systemVersionDetail = "";
         private string _cpuModel = "检测中...";
@@ -29,7 +29,7 @@ namespace DiskCleaner.ViewModels
         private string _memoryDetail = "";
         private string _gpuModel = "检测中...";
 
-        // ---------- 性能监控 ----------
+        
         private double _cpuPercent;
         private double _ramPercent;
         private double _gpuPercent;
@@ -37,8 +37,9 @@ namespace DiskCleaner.ViewModels
         private string _ramUsageText = "0%";
         private string _gpuUsageText = "0%";
         private string _releaseStatusMessage = "";
+        private CancellationTokenSource _releaseMessageCts;
 
-        // ---------- 属性 ----------
+        
         public ObservableCollection<DriveCardInfo> DriveCards
         {
             get => _driveCards;
@@ -63,12 +64,12 @@ namespace DiskCleaner.ViewModels
 
         public string ReleaseStatusMessage { get => _releaseStatusMessage; set => SetProperty(ref _releaseStatusMessage, value); }
 
-        // ---------- 命令 ----------
+        
         public ICommand RefreshMonitorCommand { get; private set; }
         public ICommand FreeMemoryCommand { get; private set; }
         public ICommand OpenDriveCommand { get; private set; }
 
-        // ---------- 加载（切到本标签页时调用） ----------
+        
         internal async Task LoadDashboardAsync()
         {
             await Task.WhenAll(LoadSystemInfoAsync(), RefreshMonitorAsync());
@@ -137,14 +138,14 @@ namespace DiskCleaner.ViewModels
         {
             try
             {
-                // 先用原生 API 快速拿 CPU / 内存 / 磁盘占用（毫秒级，无 WMI），仪表盘立即有数据，不等待慢速的 GPU WMI。
+                
                 var fast = await _monitorService.GetCpuRamDiskAsync();
                 CpuPercent = fast.cpu;
                 RamPercent = fast.ram;
                 CpuUsageText = $"{fast.cpu:0.0}%";
                 RamUsageText = $"{fast.ram:0.0}%";
 
-                // GPU 占用走 WMI 性能计数器，冷启动可能 1~3 秒；改为后台异步回填，不阻塞首屏。
+                
                 _ = Task.Run(async () =>
                 {
                     try
@@ -156,7 +157,7 @@ namespace DiskCleaner.ViewModels
                             GpuUsageText = $"{g:0.0}%";
                         });
                     }
-                    catch { /* GPU 取数失败保持 0% */ }
+                    catch {   }
                 });
             }
             catch (Exception ex)
@@ -169,16 +170,30 @@ namespace DiskCleaner.ViewModels
         {
             try
             {
-                ReleaseStatusMessage = "正在释放内存...";
+                // 取消上一次自动清空的计时，避免新的状态被旧定时器清掉
+                _releaseMessageCts?.Cancel();
+                _releaseMessageCts?.Dispose();
+                _releaseMessageCts = new CancellationTokenSource();
+                var cts = _releaseMessageCts;
+
+                ReleaseStatusMessage = "正在释放系统内存...";
                 var (message, _, _) = await Task.Run(() =>
                     SystemOptimizeService.OptimizeMemory(msg => _uiDispatcher.Invoke(() => ReleaseStatusMessage = msg)));
                 ReleaseStatusMessage = message;
                 await RefreshMonitorAsync();
+
+                // 3 秒后自动清空提示
+                try
+                {
+                    await Task.Delay(3000, cts.Token);
+                    ReleaseStatusMessage = "";
+                }
+                catch (OperationCanceledException) { }
             }
             catch (Exception ex)
             {
-                ReleaseStatusMessage = "释放内存失败: " + ex.Message;
-                _logger.Error("释放内存失败", ex);
+                ReleaseStatusMessage = "释放系统内存失败: " + ex.Message;
+                _logger.Error("释放系统内存失败", ex);
             }
         }
 

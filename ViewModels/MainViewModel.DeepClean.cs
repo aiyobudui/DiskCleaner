@@ -1,6 +1,7 @@
-using DiskCleaner.Interop;
+﻿using DiskCleaner.Interop;
 using DiskCleaner.Models;
 using DiskCleaner.Services;
+using DiskCleaner.Views;
 using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
@@ -9,6 +10,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -16,34 +18,34 @@ using System.Windows.Input;
 
 namespace DiskCleaner.ViewModels
 {
-    /// <summary>
-    /// 深度清理标签页：垃圾清理（树形分组）、极限清理（系统工具）、空文件夹扫描/删除。
-    /// 直接调用共享核心中的服务（_cleanService 通过 CleanService 静态方法）、工具与状态方法。
-    /// </summary>
+    
+    
+    
+    
     public partial class MainViewModel : ViewModelBase
     {
-        // ---------- 集合 ----------
+        
         private ObservableCollection<CleanGroup> _cleanGroups = new();
         private ObservableCollection<OptimizeTool> _optimizeTools = new();
         private ObservableCollection<string> _optimizeLogList = new();
         private ObservableCollection<string> _emptyFolderList = new();
 
-        // ---------- 展开状态（默认收起，点击标题展开） ----------
+        
         private bool _isGarbageCleanupExpanded;
         private bool _isSystemToolsExpanded;
         private bool _isEmptyFolderExpanded;
 
-        // ---------- 清理进度 ----------
+        
         private bool _isCleaning;
         private string _cleanProgressText = "";
         private int _cleanFileCount;
         private string _recommendedTotalText = "—";
 
-        // ---------- 空文件夹 ----------
+        
         private string _emptyFolderReportText = "";
         private string _emptyFolderStatusText = "";
 
-        // ---------- 属性 ----------
+        
         public ObservableCollection<CleanGroup> CleanGroups
         {
             get => _cleanGroups;
@@ -62,6 +64,9 @@ namespace DiskCleaner.ViewModels
             private set => SetProperty(ref _optimizeLogList, value);
         }
 
+        private readonly ConcurrentDictionary<OptimizeTool, CancellationTokenSource> _toolCtsMap = new();
+        private bool AnyToolRunning => _toolCtsMap.Count > 0;
+
         public ObservableCollection<string> EmptyFolderList
         {
             get => _emptyFolderList;
@@ -74,11 +79,11 @@ namespace DiskCleaner.ViewModels
 
         public bool IsCleaning { get => _isCleaning; private set => SetProperty(ref _isCleaning, value); }
 
-        /// <summary>是否已执行过扫描。扫描前为 false（列表区域整体隐藏），扫描完成后为 true 才显示结果。</summary>
+        
         private bool _hasScanned;
         public bool HasScanned { get => _hasScanned; private set => SetProperty(ref _hasScanned, value); }
 
-        /// <summary>是否存在已勾选且非禁用的清理项（用于清理按钮可用性，无需先扫描）。</summary>
+        
         public bool HasCleanableSelection =>
             AllCleanItems(CleanGroups).Any(c => c.IsChecked == true && c.Risk != RiskLevel.Forbidden);
 
@@ -86,30 +91,30 @@ namespace DiskCleaner.ViewModels
         public int CleanFileCount { get => _cleanFileCount; set => SetProperty(ref _cleanFileCount, value); }
         public string RecommendedTotalText { get => _recommendedTotalText; set => SetProperty(ref _recommendedTotalText, value); }
 
-        // ---------- 扫描进度（确定性进度条 + 当前扫描项 + 百分比） ----------
+        
         private bool _isScanning;
         private int _scanProgressValue;
         private string _scanCurrentItem = "";
-        /// <summary>是否正在扫描（驱动扫描进度条可见性，区别于清理 IsCleaning）。</summary>
+        
         public bool IsScanning { get => _isScanning; private set => SetProperty(ref _isScanning, value); }
-        /// <summary>扫描进度百分比 0–100，用于确定性进度条。</summary>
+        
         public int ScanProgressValue { get => _scanProgressValue; private set => SetProperty(ref _scanProgressValue, value); }
-        /// <summary>当前正在扫描的清理项名称，如「微信缓存」，便于用户实时了解进度。</summary>
+        
         public string ScanCurrentItem { get => _scanCurrentItem; private set => SetProperty(ref _scanCurrentItem, value); }
 
         public string EmptyFolderReportText { get => _emptyFolderReportText; set => SetProperty(ref _emptyFolderReportText, value); }
         public string EmptyFolderStatusText { get => _emptyFolderStatusText; set => SetProperty(ref _emptyFolderStatusText, value); }
 
-        // ---------- 命令 ----------
+        
         public ICommand ScanCommand { get; private set; }
         public ICommand CleanCommand { get; private set; }
         public ICommand RefreshCommand { get; private set; }
         public ICommand EmptyFolderScanCommand { get; private set; }
         public ICommand EmptyFolderDeleteCommand { get; private set; }
 
-        // 每个极限清理工具自带 Command（在 AddOptimizeTool 中赋值），无需在此暴露独立命令。
+        
 
-        // ---------- 初始化（保证树形清理项只构建一次） ----------
+        
         private bool _cleanItemsInitialized;
         internal void EnsureCleanItemsInitialized()
         {
@@ -117,10 +122,10 @@ namespace DiskCleaner.ViewModels
             _cleanItemsInitialized = true;
             InitCleanItems();
             AddOptimizeTools();
-            // 标签内容刚生成，强制 WPF 重新评估所有以「非忙碌」为条件的命令（如清理按钮），
-            // 避免按钮停留在加载期的禁用态、必须等一次交互（如扫描）才刷新的问题。
+            
+            
             System.Windows.Input.CommandManager.InvalidateRequerySuggested();
-            // 订阅每个清理项的勾选变化，实时刷新「清理」按钮可用态（HasCleanableSelection 派生属性）。
+            
             foreach (var item in AllCleanItems(CleanGroups))
             {
                 item.PropertyChanged += (s, e) =>
@@ -131,153 +136,418 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>构建垃圾清理树（顶层直接为：系统清理 / 应用清理 / 电脑使用痕迹）。</summary>
+        
         private void InitCleanItems()
         {
-            var systemGroup = new CleanGroup("系统清理") { IsExpanded = true };
+            var systemGroup = new CleanGroup("系统清理");
             systemGroup.AddRange(new List<ICleanNode>
             {
-                MakeCleanItem("temp_files", "临时文件", "清理 Windows 与用户临时文件目录", RiskLevel.Safe, CleanTempFiles, () => true),
-                MakeCleanItem("minidumps", "系统错误小型转储文件", "删除 C:\\Windows\\Minidump 中的小型转储文件", RiskLevel.Safe, CleanMinidumps, () => true),
-                MakeCleanItem("windows_logs", "Windows 日志文件", "清理 C:\\Windows\\Logs 目录", RiskLevel.Safe,
-                    () => CleanService.DeleteDirContents(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Logs"), _logger),
+                MakeCleanItem("temp_files", "临时文件", "清理 Windows 与用户临时文件目录", RiskLevel.Safe, CleanTempFiles),
+                MakeCleanItem("minidumps", "系统错误小型转储文件", "删除 C:\\Windows\\Minidump 中的小型转储文件", RiskLevel.Safe, CleanMinidumps),
+                MakeCleanItem("windows_logs", "Windows 日志文件", "清理 C:\\Windows\\Logs 目录（清理前自动停止 Windows Update / WaaSMedic 等更新服务以释放被锁定的日志，清理后自动恢复）", RiskLevel.Safe,
+                    () => CleanService.CleanWindowsLogs(_logger),
                     () => Directory.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Logs"))),
-                MakeCleanItem("driver_packages", "设备驱动程序包", "仅清理未被任何设备使用的旧驱动包（如历史显卡/声卡残留），绝不删除正在使用的驱动", RiskLevel.Caution, CleanOldDriverPackages, () => true),
-                MakeCleanItem("thumbnail_cache", "缩略图缓存", "清理 Windows 缩略图缓存文件", RiskLevel.Safe, CleanThumbnailCache, () => true),
-                MakeCleanItem("inet_cache", "Internet 临时文件", "清理 Internet Explorer/系统 INetCache 缓存", RiskLevel.Safe, CleanInternetCache, () => true),
+                MakeCleanItem("driver_packages", "设备驱动程序包", "仅清理未被任何设备使用的旧驱动包（如历史显卡/声卡残留），绝不删除正在使用的驱动；清理前先检测系统是否正在升级/维护，升级中自动跳过", RiskLevel.Caution, CleanOldDriverPackages, () => !IsSystemUpgrading()),
+                MakeCleanItem("thumbnail_cache", "缩略图缓存", "清理 Windows 缩略图缓存文件", RiskLevel.Safe, CleanThumbnailCache),
+                MakeCleanItem("inet_cache", "Internet 临时文件", "清理 Internet Explorer/系统 INetCache 缓存", RiskLevel.Safe, CleanInternetCache),
                 MakeCleanItem("wer", "Windows 错误报告和反馈", "清理 Windows 错误报告与反馈文件", RiskLevel.Safe,
                     () => CleanService.DeleteDirContents(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), @"Microsoft\Windows\WER"), _logger),
                     () => Directory.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), @"Microsoft\Windows\WER"))),
-                MakeCleanItem("delivery_optimization", "传递优化文件", "清理 Windows 传递优化与更新下载缓存", RiskLevel.Safe, CleanDeliveryOptimization, () => true),
-                MakeCleanItem("windows_widgets", "Windows 小组件", "清理 Windows 小组件（WebExperience）缓存", RiskLevel.Safe, CleanWindowsWidgets, () => true),
-                MakeCleanItem("directx_shader_cache", "DirectX 着色器缓存", "清理 DirectX 着色器缓存（D3DSCache）", RiskLevel.Safe, CleanDirectXShaderCache, () => true),
-                MakeCleanItem("cert_cache", "Windows 网络证书缓存", "清理用于证书验证的网络缓存（CryptnetUrlCache，如 CRL/OCSP 响应）", RiskLevel.Safe, CleanCertCache, () => true),
-                MakeCleanItem("prefetch", "预读取文件", "清理 C:\\Windows\\Prefetch 中的预读取缓存（不影响已安装程序运行）", RiskLevel.Safe, CleanPrefetch, () => true),
-                MakeCleanItem("memory_dump", "内存转储文件", "删除 C:\\Windows\\MEMORY.DMP（系统蓝屏后生成的大型转储，可释放数 GB）", RiskLevel.Safe, CleanMemoryDump, () => true),
-                MakeCleanItem("store_cache", "应用商店缓存", "清理 Microsoft Store 的本地缓存（LocalCache），不改卸载已装应用", RiskLevel.Safe, CleanStoreCache, () => true),
-                MakeCleanItem("windows_upgrade_temp", "Windows 升级临时文件", "清理 Windows 大版本升级遗留的临时文件（C:\\$WINDOWS.~BT、$WINDOWS.~WS、$WINDOWS.~Q）。注意：升级后 10 天内删除将无法回滚到旧版本系统！", RiskLevel.Caution, CleanWindowsUpgradeTemp, () => true),
-                MakeCleanItem("defender_history", "Windows Defender 历史扫描", "清理 Windows Defender 扫描历史与隔离区元数据（不删除已隔离的恶意文件本体）", RiskLevel.Safe, CleanDefenderHistory, () => true),
-                MakeCleanItem("font_cache", "Windows 字体缓存", "清理系统字体缓存服务（FontCache）的临时数据，删除后系统会自动重建", RiskLevel.Safe, CleanFontCache, () => true),
-                MakeCleanItem("live_kernel_reports", "实时内核报告", "清理 C:\\Windows\\LiveKernelReports 中的实时内核崩溃报告", RiskLevel.Safe, CleanLiveKernelReports, () => true),
-                MakeCleanItem("icon_cache", "Windows 图标缓存", "清理 %LocalAppData%\\IconCache.db 图标缓存数据库，删除后系统会自动重建图标缓存", RiskLevel.Safe, CleanIconCache, () => true)
+                MakeCleanItem("delivery_optimization", "传递优化文件", "清理 Windows 传递优化与更新下载缓存", RiskLevel.Safe, CleanDeliveryOptimization),
+                MakeCleanItem("windows_widgets", "Windows 小组件", "清理 Windows 小组件（WebExperience）缓存", RiskLevel.Safe, CleanWindowsWidgets),
+                MakeCleanItem("directx_shader_cache", "DirectX 着色器缓存", "清理 DirectX 着色器缓存（D3DSCache）", RiskLevel.Safe, CleanDirectXShaderCache),
+                MakeCleanItem("cert_cache", "Windows 网络证书缓存", "清理用于证书验证的网络缓存（CryptnetUrlCache，如 CRL/OCSP 响应）", RiskLevel.Safe, CleanCertCache),
+                MakeCleanItem("prefetch", "预读取文件", "清理 C:\\Windows\\Prefetch 中的预读取缓存（不影响已安装程序运行）", RiskLevel.Safe, CleanPrefetch),
+                MakeCleanItem("memory_dump", "内存转储文件", "删除 C:\\Windows\\MEMORY.DMP（系统蓝屏后生成的大型转储，可释放数 GB）", RiskLevel.Safe, CleanMemoryDump),
+                MakeCleanItem("store_cache", "应用商店缓存", "清理 Microsoft Store 的本地缓存（LocalCache），不改卸载已装应用", RiskLevel.Safe, CleanStoreCache),
+                MakeCleanItem("windows_upgrade_temp", "Windows 升级临时文件", "清理 Windows 大版本升级遗留的临时文件（C:\\$WINDOWS.~BT、$WINDOWS.~WS、$WINDOWS.~Q）。注意：升级后 10 天内删除将无法回滚到旧版本系统！清理前先检测系统是否正在升级/维护，升级中自动跳过", RiskLevel.Caution, CleanWindowsUpgradeTemp, () => !IsSystemUpgrading()),
+                MakeCleanItem("defender_history", "Windows Defender 历史扫描", "清理 Windows Defender 扫描历史与隔离区元数据（不删除已隔离的恶意文件本体）", RiskLevel.Safe, CleanDefenderHistory),
+                MakeCleanItem("font_cache", "Windows 字体缓存", "清理系统字体缓存服务（FontCache）的临时数据，删除后系统会自动重建", RiskLevel.Safe, CleanFontCache),
+                MakeCleanItem("live_kernel_reports", "实时内核报告", "清理 C:\\Windows\\LiveKernelReports 中的实时内核崩溃报告", RiskLevel.Safe, CleanLiveKernelReports),
+                MakeCleanItem("icon_cache", "Windows 图标缓存", "清理 %LocalAppData%\\IconCache.db 图标缓存数据库，删除后系统会自动重建图标缓存", RiskLevel.Safe, CleanIconCache)
             });
 
-            var appGroup = new CleanGroup("应用清理") { IsExpanded = true };
+            var appGroup = new CleanGroup("应用清理");
             appGroup.AddRange(new List<ICleanNode>
             {
-                MakeCleanItem("edge_cache", "Edge 缓存", "清理 Microsoft Edge 浏览器缓存", RiskLevel.Safe, CleanEdgeCache, () => true),
-                MakeCleanItem("chrome_cache", "Chrome 缓存", "清理 Google Chrome 浏览器缓存与代码缓存", RiskLevel.Safe, CleanChromeCache, () => true),
-                MakeCleanItem("firefox_cache", "Firefox 缓存", "清理 Mozilla Firefox 浏览器缓存", RiskLevel.Safe, CleanFirefoxCache, () => true),
-                MakeCleanItem("brave_cache", "Brave 缓存", "清理 Brave 浏览器缓存与代码缓存", RiskLevel.Safe, CleanBraveCache, () => true),
-                MakeCleanItem("opera_cache", "Opera 缓存", "清理 Opera 浏览器缓存与代码缓存", RiskLevel.Safe, CleanOperaCache, () => true),
-                MakeCleanItem("quark_cache", "Quark浏览器缓存", "清理 Quark 浏览器缓存", RiskLevel.Safe, CleanQuarkCache, () => true),
-                MakeCleanItem("dingtalk_cache", "钉钉缓存", "清理钉钉缓存目录", RiskLevel.Safe, CleanDingTalkCache, () => true),
-                MakeCleanItem("netease_cache", "网易云音乐缓存", "清理网易云音乐缓存与 web 数据", RiskLevel.Safe, CleanNetEaseMusicCache, () => true),
-                MakeCleanItem("steam_cache", "Steam 缓存", "清理 Steam 下载缓存与 HTTP 缓存", RiskLevel.Safe, CleanSteamCache, () => true),
-                MakeCleanItem("baidu_pan_cache", "百度网盘缓存", "清理百度网盘客户端缓存目录", RiskLevel.Safe, CleanBaiduPanCache, () => true),
-                MakeCleanItem("thunder_cache", "迅雷缓存", "清理迅雷客户端缓存与种子缓存", RiskLevel.Safe, CleanThunderCache, () => true),
-                MakeCleanItem("bilibili_cache", "哔哩哔哩缓存", "清理哔哩哔哩客户端缓存", RiskLevel.Safe, CleanBilibiliCache, () => true),
-                MakeCleanItem("iqiyi_cache", "爱奇艺缓存", "清理爱奇艺客户端缓存", RiskLevel.Safe, CleanIqiyiCache, () => true),
-                MakeCleanItem("discord_cache", "Discord 缓存", "清理 Discord 客户端缓存与代码缓存", RiskLevel.Safe, CleanDiscordCache, () => true),
-                MakeCleanItem("browser360_cache", "360 浏览器缓存", "清理 360 极速浏览器缓存与代码缓存", RiskLevel.Safe, CleanBrowser360Cache, () => true),
-                MakeCleanItem("sogou_cache", "搜狗浏览器缓存", "清理搜狗浏览器缓存", RiskLevel.Safe, CleanSogouCache, () => true),
-                MakeCleanItem("feishu_cache", "飞书缓存", "清理飞书客户端缓存与用户数据缓存", RiskLevel.Safe, CleanFeishuCache, () => true),
-                MakeCleanItem("wemeet_cache", "腾讯会议缓存", "清理腾讯会议客户端缓存与录制临时文件", RiskLevel.Safe, CleanWeMeetCache, () => true),
-                MakeCleanItem("jianying_cache", "剪映缓存", "清理剪映专业版缓存与草稿渲染临时文件", RiskLevel.Safe, CleanJianyingCache, () => true),
-                MakeCleanItem("telegram_cache", "Telegram 缓存", "清理 Telegram 桌面端缓存数据（保留登录信息）", RiskLevel.Safe, CleanTelegramCache, () => true),
-                MakeCleanItem("spotify_cache", "Spotify 缓存", "清理 Spotify 客户端离线缓存与存储", RiskLevel.Safe, CleanSpotifyCache, () => true),
-                MakeCleanItem("adobe_cache", "Adobe 媒体缓存", "清理 Adobe 系列（PR/AE/PS）的媒体缓存文件", RiskLevel.Safe, CleanAdobeCache, () => true),
-                MakeCleanItem("kuaishou_cache", "快手缓存", "清理快手 PC 客户端缓存", RiskLevel.Safe, CleanKuaishouCache, () => true),
+                MakeCleanItem("edge_cache", "Edge 缓存", "清理 Microsoft Edge 浏览器缓存", RiskLevel.Safe, CleanEdgeCache),
+                MakeCleanItem("edge_update_cache", "Edge 更新安装包缓存", "清理 Microsoft EdgeUpdate 下载的更新安装包残留（Program Files (x86)\\Microsoft\\EdgeUpdate\\Download），属已应用更新的旧安装包，删除后下次更新会重新下载；目录受系统保护，需以管理员身份运行本程序才能实际删除。", RiskLevel.Safe, CleanEdgeUpdateCache),
+                MakeCleanItem("edge_bak", "Edge 备份文件", "清理 Edge 浏览器用户数据目录下的自动备份文件（*.bak，如 Bookmarks.bak）。这些是 Edge 每次修改数据时生成的上一版快照备份，删除后会在下次修改时自动重建，不影响当前书签/数据。", RiskLevel.Safe, CleanEdgeBak),
+                MakeCleanItem("chrome_cache", "Chrome 缓存", "清理 Google Chrome 浏览器缓存与代码缓存", RiskLevel.Safe, CleanChromeCache),
+                MakeCleanItem("firefox_cache", "Firefox 缓存", "清理 Mozilla Firefox 浏览器缓存", RiskLevel.Safe, CleanFirefoxCache),
+                MakeCleanItem("brave_cache", "Brave 缓存", "清理 Brave 浏览器缓存与代码缓存", RiskLevel.Safe, CleanBraveCache),
+                MakeCleanItem("opera_cache", "Opera 缓存", "清理 Opera 浏览器缓存与代码缓存", RiskLevel.Safe, CleanOperaCache),
+                MakeCleanItem("quark_cache", "Quark浏览器缓存", "清理 Quark 浏览器各类可重建缓存：HTTP 磁盘缓存(Cache/Cache_Data)、代码缓存(Code Cache)、GPU 缓存、图片/Blob/远程资源缓存、WebGPU 缓存、Service Worker 缓存等（覆盖默认与多 Profile）。均为纯缓存，删除后浏览器按需重建；清理前建议先关闭 Quark，否则运行中的文件可能被占用无法删除。", RiskLevel.Safe, CleanQuarkCache),
+                MakeCleanItem("androws_cef_cache", "Androws 模拟器缓存", "清理腾讯 Androws 安卓模拟器内置 CEF（Chromium 内核）缓存与可重建数据：HTTP 磁盘缓存(Cache)、代码缓存(Code Cache)、GPU 缓存、站点特征数据库(Site Characteristics Database)、图片/Blob/远程资源缓存、WebGPU 缓存、Service Worker 缓存等（覆盖默认与多 Profile）。均为纯缓存，删除后模拟器按需重建；清理前建议先关闭 Androws，否则运行中的文件可能被占用无法删除。", RiskLevel.Safe, CleanAndrowsCefCache),
+                MakeCleanItem("github_cache", "GitHub Desktop 缓存", "清理 GitHub Desktop（基于 Electron/Chromium）的缓存目录 `Cache\\Cache_Data`（Chromium 磁盘缓存，含 data_* 与 index）与 `No_Vary_Search` 等。均为纯缓存，删除后程序按需重建；清理前建议先关闭 GitHub Desktop，否则运行中的文件可能被占用无法删除。", RiskLevel.Safe, CleanGitHubDesktopCache),
+                MakeCleanItem("ie_cache", "IE 浏览器缓存", "清理 IE 的网页缓存（含临时文件、Cookie 与历史记录），存储于系统 WebCache 数据库。该文件通常被系统进程锁定，直接删除可能因“文件正在使用”而跳过；建议先关闭 IE、重启资源管理器，或通过系统“删除浏览历史记录”清理。删除后系统会按需重建，不影响其它程序。", RiskLevel.Safe, CleanWebCache),
+                MakeCleanItem("legacy_edge_cache", "传统 Edge 缓存", "清理传统（EdgeHTML 版）Edge 的网页缓存（含临时文件、Cookie 与历史记录），与 IE 共用系统 WebCache 数据库。该文件通常被系统进程锁定，直接删除可能因“文件正在使用”而跳过；建议先关闭相关程序、重启资源管理器，或通过系统“删除浏览历史记录”清理。删除后系统会按需重建，不影响其它程序。", RiskLevel.Safe, CleanWebCache),
+                MakeCleanItem("dingtalk_cache", "钉钉缓存", "清理钉钉缓存目录", RiskLevel.Safe, CleanDingTalkCache),
+                MakeCleanItem("netease_cache", "网易云音乐缓存", "清理网易云音乐缓存与 web 数据", RiskLevel.Safe, CleanNetEaseMusicCache),
+                MakeCleanItem("steam_cache", "Steam 缓存", "清理 Steam 下载缓存与 HTTP 缓存", RiskLevel.Safe, CleanSteamCache),
+                MakeCleanItem("baidu_pan_cache", "百度网盘缓存", "清理百度网盘客户端缓存目录", RiskLevel.Safe, CleanBaiduPanCache),
+                MakeCleanItem("thunder_cache", "迅雷缓存", "清理迅雷客户端缓存与种子缓存", RiskLevel.Safe, CleanThunderCache),
+                MakeCleanItem("bilibili_cache", "哔哩哔哩缓存", "清理哔哩哔哩客户端缓存", RiskLevel.Safe, CleanBilibiliCache),
+                MakeCleanItem("iqiyi_cache", "爱奇艺缓存", "清理爱奇艺客户端缓存", RiskLevel.Safe, CleanIqiyiCache),
+                MakeCleanItem("discord_cache", "Discord 缓存", "清理 Discord 客户端缓存与代码缓存", RiskLevel.Safe, CleanDiscordCache),
+                MakeCleanItem("browser360_cache", "360 浏览器缓存", "清理 360 极速浏览器缓存与代码缓存", RiskLevel.Safe, CleanBrowser360Cache),
+                MakeCleanItem("sogou_cache", "搜狗浏览器缓存", "清理搜狗浏览器缓存", RiskLevel.Safe, CleanSogouCache),
+                MakeCleanItem("feishu_cache", "飞书缓存", "清理飞书客户端缓存与用户数据缓存", RiskLevel.Safe, CleanFeishuCache),
+                MakeCleanItem("wemeet_cache", "腾讯会议缓存", "清理腾讯会议客户端缓存与录制临时文件", RiskLevel.Safe, CleanWeMeetCache),
+                MakeCleanItem("jianying_cache", "剪映缓存", "清理剪映专业版缓存与草稿渲染临时文件", RiskLevel.Safe, CleanJianyingCache),
+                MakeCleanItem("telegram_cache", "Telegram 缓存", "清理 Telegram 桌面端缓存数据（保留登录信息）", RiskLevel.Safe, CleanTelegramCache),
+                MakeCleanItem("spotify_cache", "Spotify 缓存", "清理 Spotify 客户端离线缓存与存储", RiskLevel.Safe, CleanSpotifyCache),
+                MakeCleanItem("adobe_cache", "Adobe 媒体缓存", "清理 Adobe 系列（PR/AE/PS）的媒体缓存文件", RiskLevel.Safe, CleanAdobeCache),
+                MakeCleanItem("kuaishou_cache", "快手缓存", "清理快手 PC 客户端缓存", RiskLevel.Safe, CleanKuaishouCache),
 
-                // ===== 即时通讯（国内主流，原列表遗漏） =====
-                MakeCleanItem("wechat_cache", "微信缓存", "仅清理微信 FileStorage\\Cache 临时缓存，绝不触碰聊天记录、聊天图片视频与接收的文件", RiskLevel.Safe, CleanWeChatCache, () => true),
-                MakeCleanItem("qq_cache", "QQ 缓存", "仅清理 QQ RichMedia 富媒体缩略图缓存，绝不触碰聊天图片视频与接收的文件", RiskLevel.Safe, CleanQQCache, () => true),
-                MakeCleanItem("wxwork_cache", "企业微信缓存", "仅清理企业微信 Cache 临时缓存，保留聊天记录、图片视频与接收的文件", RiskLevel.Safe, CleanWXWorkCache, () => true),
-                MakeCleanItem("mailmaster_cache", "网易邮箱大师缓存", "清理网易邮箱大师客户端缓存", RiskLevel.Safe, CleanMailMasterCache, () => true),
+                
+                MakeCleanItem("wechat_cache", "微信缓存", "仅清理微信 FileStorage\\Cache 临时缓存，绝不触碰聊天记录、聊天图片视频与接收的文件", RiskLevel.Safe, CleanWeChatCache),
+                MakeCleanItem("qq_cache", "QQ 缓存", "清理 QQ RichMedia 富媒体缩略图缓存，以及 QQ NT（新版）Chromium 内核缓存（Cache/Code Cache/GPUCache，含 Cache_Data）。均为纯缓存，与聊天数据（Roaming\\Tencent\\QQ\\Storage）隔离，绝不触碰聊天图片视频与接收的文件", RiskLevel.Safe, CleanQQCache),
+                MakeCleanItem("wxwork_cache", "企业微信缓存", "仅清理企业微信 Cache 临时缓存，保留聊天记录、图片视频与接收的文件", RiskLevel.Safe, CleanWXWorkCache),
+                MakeCleanItem("mailmaster_cache", "网易邮箱大师缓存", "清理网易邮箱大师客户端缓存", RiskLevel.Safe, CleanMailMasterCache),
 
-                // ===== 浏览器（原列表遗漏） =====
-                MakeCleanItem("qq_browser_cache", "QQ浏览器缓存", "清理 QQ 浏览器缓存与代码缓存", RiskLevel.Safe, CleanQQBrowserCache, () => true),
-                MakeCleanItem("vivaldi_cache", "Vivaldi 缓存", "清理 Vivaldi 浏览器缓存与代码缓存", RiskLevel.Safe, CleanVivaldiCache, () => true),
+                
+                MakeCleanItem("qq_browser_cache", "QQ浏览器缓存", "清理 QQ 浏览器缓存与代码缓存", RiskLevel.Safe, CleanQQBrowserCache),
+                MakeCleanItem("vivaldi_cache", "Vivaldi 缓存", "清理 Vivaldi 浏览器缓存与代码缓存", RiskLevel.Safe, CleanVivaldiCache),
 
-                // ===== 音视频（原列表遗漏） =====
-                MakeCleanItem("qq_music_cache", "QQ音乐缓存", "清理 QQ 音乐客户端缓存", RiskLevel.Safe, CleanQQMusicCache, () => true),
-                MakeCleanItem("kugou_cache", "酷狗音乐缓存", "清理酷狗音乐客户端缓存", RiskLevel.Safe, CleanKugouCache, () => true),
-                MakeCleanItem("kuwo_cache", "酷我音乐缓存", "清理酷我音乐客户端缓存", RiskLevel.Safe, CleanKuwoCache, () => true),
-                MakeCleanItem("qqlive_cache", "腾讯视频缓存", "清理腾讯视频客户端缓存", RiskLevel.Safe, CleanQQLiveCache, () => true),
-                MakeCleanItem("youku_cache", "优酷缓存", "清理优酷客户端缓存", RiskLevel.Safe, CleanYoukuCache, () => true),
+                
+                MakeCleanItem("qq_music_cache", "QQ音乐缓存", "清理 QQ 音乐客户端缓存", RiskLevel.Safe, CleanQQMusicCache),
+                MakeCleanItem("kugou_cache", "酷狗音乐缓存", "清理酷狗音乐客户端缓存", RiskLevel.Safe, CleanKugouCache),
+                MakeCleanItem("kuwo_cache", "酷我音乐缓存", "清理酷我音乐客户端缓存", RiskLevel.Safe, CleanKuwoCache),
+                MakeCleanItem("qqlive_cache", "腾讯视频缓存", "清理腾讯视频客户端缓存", RiskLevel.Safe, CleanQQLiveCache),
+                MakeCleanItem("youku_cache", "优酷缓存", "清理优酷客户端缓存", RiskLevel.Safe, CleanYoukuCache),
 
-                // ===== 办公与游戏（原列表遗漏） =====
-                MakeCleanItem("wps_cache", "WPS 缓存", "清理 WPS Office 备份与缓存文件", RiskLevel.Safe, CleanWPSCache, () => true),
-                MakeCleanItem("epic_cache", "Epic Games Launcher 缓存", "清理 Epic Games 启动器缓存（保留已下载游戏库）", RiskLevel.Safe, CleanEpicCache, () => true),
+                
+                MakeCleanItem("wps_cache", "WPS 缓存", "清理 WPS Office 备份与缓存文件", RiskLevel.Safe, CleanWPSCache),
+                MakeCleanItem("epic_cache", "Epic Games Launcher 缓存", "清理 Epic Games 启动器缓存（保留已下载游戏库）", RiskLevel.Safe, CleanEpicCache),
 
-                // ===== 开发工具缓存（原列表遗漏） =====
-                MakeCleanItem("vscode_cache", "VSCode 缓存", "清理 Visual Studio Code 缓存、CachedData 与 Code Cache", RiskLevel.Safe, CleanVSCodeCache, () => true),
-                MakeCleanItem("jetbrains_cache", "JetBrains 系列缓存", "清理 IDEA/PyCharm/WebStorm/Android Studio 等的 caches、log、tmp 目录（保留配置与项目）", RiskLevel.Safe, CleanJetBrainsCache, () => true),
-                MakeCleanItem("vs_component_cache", "Visual Studio 组件缓存", "清理 Visual Studio ComponentModelCache 与 IDE 缓存（不影响已建项目）", RiskLevel.Safe, CleanVSComponentCache, () => true),
-                MakeCleanItem("npm_cache", "npm 缓存", "清理 npm 包管理器缓存（C:\\Users\\{user}\\AppData\\Local\\npm-cache），下次 install 会重新下载", RiskLevel.Safe, CleanNpmCache, () => true),
-                MakeCleanItem("pip_cache", "pip 缓存", "清理 Python pip 包管理器缓存（C:\\Users\\{user}\\AppData\\Local\\pip\\cache）", RiskLevel.Safe, CleanPipCache, () => true),
-                MakeCleanItem("maven_cache", "Maven 本地仓库", "清理 Maven 本地依赖仓库（~/.m2/repository），下次构建会重新下载依赖", RiskLevel.Caution, CleanMavenCache, () => true),
-                MakeCleanItem("gradle_cache", "Gradle 缓存", "清理 Gradle 构建缓存（~/.gradle/caches），下次构建会重新下载依赖", RiskLevel.Caution, CleanGradleCache, () => true),
-                MakeCleanItem("nuget_cache", "NuGet 缓存", "清理 NuGet 包管理器 HTTP 缓存（不删除已安装包，仅删下载临时缓存）", RiskLevel.Safe, CleanNuGetCache, () => true)
+                
+                MakeCleanItem("vscode_cache", "VSCode 缓存", "清理 Visual Studio Code 缓存、CachedData 与 Code Cache", RiskLevel.Safe, CleanVSCodeCache),
+                MakeCleanItem("jetbrains_cache", "JetBrains 系列缓存", "清理 IDEA/PyCharm/WebStorm/Android Studio 等的 caches、log、tmp 目录（保留配置与项目）", RiskLevel.Safe, CleanJetBrainsCache),
+                MakeCleanItem("vs_component_cache", "Visual Studio 组件缓存", "清理 Visual Studio ComponentModelCache 与 IDE 缓存（不影响已建项目）", RiskLevel.Safe, CleanVSComponentCache),
+                MakeCleanItem("npm_cache", "npm 缓存", "清理 npm 包管理器缓存（C:\\Users\\{user}\\AppData\\Local\\npm-cache），下次 install 会重新下载", RiskLevel.Safe, CleanNpmCache),
+                MakeCleanItem("pip_cache", "pip 缓存", "清理 Python pip 包管理器缓存（C:\\Users\\{user}\\AppData\\Local\\pip\\cache）", RiskLevel.Safe, CleanPipCache),
+                MakeCleanItem("maven_cache", "Maven 本地仓库", "清理 Maven 本地依赖仓库（~/.m2/repository），下次构建会重新下载依赖", RiskLevel.Caution, CleanMavenCache),
+                MakeCleanItem("gradle_cache", "Gradle 缓存", "清理 Gradle 构建缓存（~/.gradle/caches），下次构建会重新下载依赖", RiskLevel.Caution, CleanGradleCache),
+                MakeCleanItem("nuget_cache", "NuGet 缓存", "清理 NuGet 包管理器 HTTP 缓存（不删除已安装包，仅删下载临时缓存）", RiskLevel.Safe, CleanNuGetCache)
             });
 
-            var usageTracesGroup = new CleanGroup("电脑使用痕迹") { IsExpanded = true };
+            
+            
+            var appLogGroup = new CleanGroup("应用日志清理");
+            appLogGroup.AddRange(new List<ICleanNode>
+            {
+                MakeCleanItem("edge_logs", "Edge 日志", "清理 Microsoft Edge 运行日志与崩溃报告（Crashpad）", RiskLevel.Safe, () => CleanAppLog("edge_logs")),
+                MakeCleanItem("chrome_logs", "Chrome 日志", "清理 Google Chrome 运行日志与崩溃报告（Crashpad）", RiskLevel.Safe, () => CleanAppLog("chrome_logs")),
+                MakeCleanItem("firefox_logs", "Firefox 日志", "清理 Mozilla Firefox 崩溃报告", RiskLevel.Safe, () => CleanAppLog("firefox_logs")),
+                MakeCleanItem("brave_logs", "Brave 日志", "清理 Brave 运行日志与崩溃报告（Crashpad）", RiskLevel.Safe, () => CleanAppLog("brave_logs")),
+                MakeCleanItem("opera_logs", "Opera 日志", "清理 Opera / Opera GX 崩溃报告（Crashpad）", RiskLevel.Safe, () => CleanAppLog("opera_logs")),
+                MakeCleanItem("browser360_logs", "360 浏览器日志", "清理 360 极速浏览器崩溃报告（Crashpad）", RiskLevel.Safe, () => CleanAppLog("browser360_logs")),
+                MakeCleanItem("sogou_logs", "搜狗浏览器日志", "清理搜狗浏览器日志与崩溃报告", RiskLevel.Safe, () => CleanAppLog("sogou_logs")),
+                MakeCleanItem("qqbrowser_logs", "QQ浏览器日志", "清理 QQ 浏览器崩溃报告（Crashpad）", RiskLevel.Safe, () => CleanAppLog("qqbrowser_logs")),
+                MakeCleanItem("vivaldi_logs", "Vivaldi 日志", "清理 Vivaldi 崩溃报告（Crashpad）", RiskLevel.Safe, () => CleanAppLog("vivaldi_logs")),
+                MakeCleanItem("quark_logs", "Quark浏览器日志", "清理 Quark 浏览器日志与崩溃报告", RiskLevel.Safe, () => CleanAppLog("quark_logs")),
+                MakeCleanItem("wechat_logs", "微信日志", "清理微信诊断日志（xlog），不触碰聊天记录/图片/文件", RiskLevel.Safe, () => CleanAppLog("wechat_logs")),
+                MakeCleanItem("androws_logs", "Androws 模拟器日志", "清理腾讯 Androws 安卓模拟器运行日志（ams_cache/log 下的 AmsWinSdk_*.log 等），仅删日志、不碰模拟器配置与缓存", RiskLevel.Safe, () => CleanAppLog("androws_logs")),
+                MakeCleanItem("qq_logs", "QQ 日志", "清理 QQ 运行日志（Logs / NTQQ\\log），不触碰聊天数据", RiskLevel.Safe, () => CleanAppLog("qq_logs")),
+                MakeCleanItem("wxwork_logs", "企业微信日志", "清理企业微信日志（Logs），不触碰聊天记录", RiskLevel.Safe, () => CleanAppLog("wxwork_logs")),
+                MakeCleanItem("dingtalk_logs", "钉钉日志", "清理钉钉运行日志", RiskLevel.Safe, () => CleanAppLog("dingtalk_logs")),
+                MakeCleanItem("feishu_logs", "飞书日志", "清理飞书运行日志", RiskLevel.Safe, () => CleanAppLog("feishu_logs")),
+                MakeCleanItem("discord_logs", "Discord 日志", "清理 Discord 日志", RiskLevel.Safe, () => CleanAppLog("discord_logs")),
+                MakeCleanItem("telegram_logs", "Telegram 日志", "清理 Telegram 桌面端日志", RiskLevel.Safe, () => CleanAppLog("telegram_logs")),
+                MakeCleanItem("mailmaster_logs", "网易邮箱大师日志", "清理网易邮箱大师日志", RiskLevel.Safe, () => CleanAppLog("mailmaster_logs")),
+                MakeCleanItem("vscode_logs", "VSCode 日志", "清理 Visual Studio Code 日志（%AppData%\\Code\\logs）", RiskLevel.Safe, () => CleanAppLog("vscode_logs")),
+                MakeCleanItem("npm_logs", "npm 日志", "清理 npm 安装/报错日志（~\\.npm\\_logs）", RiskLevel.Safe, () => CleanAppLog("npm_logs")),
+                MakeCleanItem("netease_logs", "网易云音乐日志", "清理网易云音乐运行日志", RiskLevel.Safe, () => CleanAppLog("netease_logs")),
+                MakeCleanItem("qqmusic_logs", "QQ音乐日志", "清理 QQ 音乐运行日志", RiskLevel.Safe, () => CleanAppLog("qqmusic_logs")),
+                MakeCleanItem("kugou_logs", "酷狗音乐日志", "清理酷狗音乐运行日志", RiskLevel.Safe, () => CleanAppLog("kugou_logs")),
+                MakeCleanItem("kuwo_logs", "酷我音乐日志", "清理酷我音乐运行日志", RiskLevel.Safe, () => CleanAppLog("kuwo_logs")),
+                MakeCleanItem("qqlive_logs", "腾讯视频日志", "清理腾讯视频运行日志", RiskLevel.Safe, () => CleanAppLog("qqlive_logs")),
+                MakeCleanItem("youku_logs", "优酷日志", "清理优酷运行日志", RiskLevel.Safe, () => CleanAppLog("youku_logs")),
+                MakeCleanItem("iqiyi_logs", "爱奇艺日志", "清理爱奇艺运行日志", RiskLevel.Safe, () => CleanAppLog("iqiyi_logs")),
+                MakeCleanItem("bilibili_logs", "哔哩哔哩日志", "清理哔哩哔哩运行日志", RiskLevel.Safe, () => CleanAppLog("bilibili_logs")),
+                MakeCleanItem("kuaishou_logs", "快手日志", "清理快手运行日志", RiskLevel.Safe, () => CleanAppLog("kuaishou_logs")),
+                MakeCleanItem("thunder_logs", "迅雷日志", "清理迅雷运行日志", RiskLevel.Safe, () => CleanAppLog("thunder_logs")),
+                MakeCleanItem("baidupan_logs", "百度网盘日志", "清理百度网盘客户端日志", RiskLevel.Safe, () => CleanAppLog("baidupan_logs")),
+                MakeCleanItem("steam_logs", "Steam 日志", "清理 Steam 运行日志（logs / log）", RiskLevel.Safe, () => CleanAppLog("steam_logs")),
+                MakeCleanItem("spotify_logs", "Spotify 日志", "清理 Spotify 运行日志", RiskLevel.Safe, () => CleanAppLog("spotify_logs")),
+                MakeCleanItem("wemeet_logs", "腾讯会议日志", "清理腾讯会议运行日志", RiskLevel.Safe, () => CleanAppLog("wemeet_logs")),
+                MakeCleanItem("jianying_logs", "剪映日志", "清理剪映专业版运行日志", RiskLevel.Safe, () => CleanAppLog("jianying_logs")),
+                MakeCleanItem("epic_logs", "Epic 日志", "清理 Epic Games Launcher 运行日志（Saved\\Logs）", RiskLevel.Safe, () => CleanAppLog("epic_logs"))
+            });
+
+            var usageTracesGroup = new CleanGroup("电脑使用痕迹");
             usageTracesGroup.AddRange(new List<ICleanNode>
             {
-                MakeCleanItem("etw_logs", "Windows 事件跟踪日志", "清理 Windows 事件跟踪（ETL）实时日志缓冲", RiskLevel.Safe, CleanEtwLogs, () => true),
-                MakeCleanItem("recent_items", "Windows 最近访问", "清理“最近使用的项目”快捷方式与跳转列表", RiskLevel.Safe, CleanRecentItems, () => true),
-                MakeCleanItem("clipboard_history", "Windows 剪贴板", "清理 Windows 剪贴板历史记录", RiskLevel.Safe, CleanClipboardHistory, () => true)
+                MakeCleanItem("etw_logs", "Windows 事件跟踪日志", "清理 Windows 事件跟踪（ETL）实时日志缓冲", RiskLevel.Safe, CleanEtwLogs),
+                MakeCleanItem("recent_items", "Windows 最近访问", "清理“最近使用的项目”快捷方式与跳转列表", RiskLevel.Safe, CleanRecentItems),
+                MakeCleanItem("clipboard_history", "Windows 剪贴板", "清理 Windows 剪贴板历史记录", RiskLevel.Safe, CleanClipboardHistory),
+                MakeCleanItem("explorer_traces", "资源管理器使用痕迹", "清理 HKCU\\Explorer\\ 下的纯使用历史：最近文档(RecentDocs)、运行框历史(RunMRU)、地址栏键入路径(TypedPaths)、程序使用统计(UserAssist)、打开/保存对话框历史(ComDlg32\\OpenSaveMRU 等)。属纯痕迹，清空后系统自动重建，不影响任何功能。", RiskLevel.Safe, CleanExplorerTraces)
             });
 
-            var registryCleanGroup = new CleanGroup("注册表清理") { IsExpanded = true };
+            var registryCleanGroup = new CleanGroup("注册表清理");
             var invalidStartupItem = MakeCleanItem("invalid_startup", "无效启动项",
                 "清理“开机启动”里指向已卸载程序的残留项，覆盖三处：① 注册表 Run/RunOnce（exe 已不存在）；② 启动文件夹（shell:startup / shell:common startup 中指向已删除程序的 .lnk 快捷方式，删除即移入回收站）；③ 任务计划程序（动作命令指向已删除 exe 的计划任务，删除前自动备份 XML）。仅删除失效的启动项，不影响任何仍有效的启动项。",
-                RiskLevel.Safe, CleanInvalidStartup, () => true);
+                RiskLevel.Safe, CleanInvalidStartup);
             var invalidComItem = MakeCleanItem("invalid_com", "失效 COM/ActiveX 组件",
                 "清理类标识符（CLSID）中服务器文件（DLL/EXE）已被删除的失效组件。仅当服务器文件经校验确实不存在时才删除该 CLSID，不触碰仍在使用的组件。",
-                RiskLevel.Safe, CleanInvalidCom, () => true);
+                RiskLevel.Safe, CleanInvalidCom);
             var invalidUninstallItem = MakeCleanItem("invalid_uninstall", "孤立卸载残留",
                 "清理“程序卸载”信息中卸载程序已丢失的残留项（软件已删但注册表残留）。仅当卸载程序文件确实不存在时才删除，不影响可正常卸载的软件。",
-                RiskLevel.Safe, CleanInvalidUninstall, () => true);
+                RiskLevel.Safe, CleanInvalidUninstall);
             var invalidContextMenuItem = MakeCleanItem("invalid_context_menu", "无效右键菜单",
                 "清理文件/文件夹/桌面右键菜单中指向已卸载程序（exe/dll 已不存在）的失效项，包括 shell 动词与 Shell 扩展（ContextMenuHandlers）。仅删除服务器文件经校验确实不存在的项，不影响任何仍有效的右键菜单。",
-                RiskLevel.Safe, CleanInvalidContextMenu, () => true);
+                RiskLevel.Safe, CleanInvalidContextMenu);
             registryCleanGroup.AddRange(new List<ICleanNode> { invalidStartupItem, invalidComItem, invalidUninstallItem, invalidContextMenuItem });
 
-            // 无效文件关联清理（打开方式残留）
+            
             var invalidFileAssociationItem = MakeCleanItem("invalid_file_association", "无效文件关联",
-                "清理文件属性「打开方式」中指向已卸载程序的残留项。扫描 HKCR\\Applications 下所有已注册应用，验证其 exe 是否存在，仅删除文件确实不存在的关联注册，确保不影响仍有效的打开方式。",
-                RiskLevel.Safe, CleanInvalidFileAssociation, () => true);
+                "清理文件打开方式与程序关联中的 5 类残留：① HKCR\\Applications（HKLM/HKCU\\Software\\Classes\\Applications）下命令指向已删除 exe 的已注册应用；② 各文件扩展名 HKCR\\.ext（.txt/.jpg/.mp3 等）及其 OpenWithProgids/OpenWithList 中失效的 ProgID/打开程序；③ HKCU/HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\.ext\\OpenWithProgids 与 OpenWithList 中的失效项；④ HKCU/HKLM\\SOFTWARE\\RegisteredApplications 中指向已删除程序的功能声明；⑤ HKCU/HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths 中指向已删除 exe 的路径项。仅验证确实不存在后才删除，不影响任何仍有效的关联。",
+                RiskLevel.Safe, CleanInvalidFileAssociation);
             registryCleanGroup.AddRange(new[] { invalidFileAssociationItem });
 
-            // 失效共享 DLL 引用
+            
             var invalidSharedDllsItem = MakeCleanItem("invalid_shared_dlls", "失效共享 DLL 引用",
                 "清理 SharedDLLs 中指向已删除 DLL 的引用计数。这些计数只用于卸载时判断 DLL 是否可安全删除，文件已不存在时是纯残留，删除不影响任何仍在使用的程序。",
-                RiskLevel.Safe, CleanInvalidSharedDlls, () => true);
+                RiskLevel.Safe, CleanInvalidSharedDlls);
 
-            // 失效 MUI 缓存
+            
             var invalidMuiCacheItem = MakeCleanItem("invalid_mui_cache", "失效 MUI 程序名缓存",
-                "清理 Windows Shell MuiCache 中指向已删除 exe 的程序名/厂商名缓存。属纯历史缓存，删除后系统会按需重建，不影响任何程序运行。",
-                RiskLevel.Safe, CleanInvalidMuiCache, () => true);
+                "清理 Windows Shell MuiCache 中指向已删除 exe 的程序名/厂商名缓存（覆盖 64 位与 32 位 WOW64 程序两套缓存）。属纯历史缓存，删除后系统会按需重建，不影响任何程序运行。",
+                RiskLevel.Safe, CleanInvalidMuiCache);
 
-            // 失效兼容性设置
+            
             var invalidAppCompatLayersItem = MakeCleanItem("invalid_appcompat_layers", "失效兼容性设置",
                 "清理 AppCompatFlags\\Layers 中为已删除 exe 保留的兼容性设置（如以管理员运行、禁用 DPI 缩放等）。文件已不存在时该设置为纯残留，删除后不影响现有程序。",
-                RiskLevel.Safe, CleanInvalidAppCompatLayers, () => true);
+                RiskLevel.Safe, CleanInvalidAppCompatLayers);
 
-            registryCleanGroup.AddRange(new[] { invalidSharedDllsItem, invalidMuiCacheItem, invalidAppCompatLayersItem });
+            
+            var invalidAppCompatStoreItem = MakeCleanItem("invalid_appcompat_store", "失效兼容性助手记录",
+                "清理 AppCompatFlags\\Compatibility Assistant\\Store 中指向已删除 exe 的兼容性助手(PCA)运行记录。这是 Windows 记录“曾运行过哪些程序”的内部台账，程序卸载/删除后不会自动清理；文件已不存在的记录为纯残留，删除后不影响任何程序，重装并运行会由系统自动重建。",
+                RiskLevel.Safe, CleanInvalidCompatStore);
 
-            var recycleGroup = new CleanGroup("回收站") { IsExpanded = true };
-            var emptyRecycleItem = MakeCleanItem("empty_recycle_bin", "清空回收站", "⚠ 将清空【所有磁盘】的回收站，包括您手动删除的文件，不可恢复。其余清理项默认先移入回收站以便误删恢复；仅当您确认不再需要回收站内任何内容时，才勾选此项。", RiskLevel.Caution, () => CleanService.EmptyRecycleBin(_logger), () => true);
-            emptyRecycleItem.AlwaysShow = true; // 动作型项，不随「0B 隐藏」过滤
-            emptyRecycleItem.IsChecked = false; // 回收站始终不自动勾选，由用户手动决定
-            recycleGroup.AddRange(new[] { emptyRecycleItem }); // 用 AddRange 以注册 PropertyChanged，确保大小同步
+            
+            var invalidFirewallRuleItem = MakeCleanItem("invalid_firewall_rule", "失效防火墙规则",
+                "清理 Windows 防火墙中指向已卸载程序(App=路径不存在)的孤儿规则。这类规则是软件卸载后残留、对网络无任何实际作用的失效项，删除不影响仍在使用的程序或系统自带规则（写入 HKLM 需管理员权限，非管理员时自动跳过）。",
+                RiskLevel.Safe, CleanInvalidFirewallRules);
 
-            CleanGroups = new ObservableCollection<CleanGroup> { systemGroup, appGroup, usageTracesGroup, registryCleanGroup, recycleGroup };
+            registryCleanGroup.AddRange(new[] { invalidSharedDllsItem, invalidMuiCacheItem, invalidAppCompatLayersItem, invalidAppCompatStoreItem, invalidFirewallRuleItem });
+
+            var recycleGroup = new CleanGroup("回收站");
+            var emptyRecycleItem = MakeCleanItem("empty_recycle_bin", "清空回收站", "⚠ 将清空【所有磁盘】的回收站，包括您手动删除的文件，不可恢复。其余清理项现在直接删除（不再移入回收站）。仅当您确认不再需要回收站内任何内容时，才勾选此项。", RiskLevel.Caution, () => CleanService.EmptyRecycleBin(_logger));
+            emptyRecycleItem.IsChecked = false; 
+            recycleGroup.AddRange(new[] { emptyRecycleItem }); 
+
+            CleanGroups = new ObservableCollection<CleanGroup> { systemGroup, appGroup, appLogGroup, usageTracesGroup, registryCleanGroup, recycleGroup };
+
+            WireBrowserKillButtons();
         }
 
-        private static CleanItem MakeCleanItem(string id, string name, string desc, RiskLevel risk, Func<CleanService.CleanResult> clean, Func<bool> canClean)
+        // 浏览器/客户端类缓存项：关联其进程名，运行时在卡片上显示“关闭并清理”按钮。
+        // 点击按钮 → 杀掉关联进程 → 再执行本项清理（解决“程序开着导致缓存文件被占用删不掉”的问题）。
+        // 范围：浏览器 + 用户近期涉及的 Quark/Androws/GitHub Desktop 等；其余客户端（微信/QQ/飞书…）保持 best-effort 删除，避免误杀带用户数据的进程。
+        // 注意：ie_cache / legacy_edge_cache 共用 WebCacheV01.dat，由系统进程(dllhost/explorer)锁定；
+        // 杀 IE/Edge 浏览器进程解不开该锁，而杀系统进程违反项目安全约定（项目说明 L385/L1394），故两者均不加关闭按钮。
+        private static readonly Dictionary<string, string[]> BrowserProcessNames = new()
         {
+            ["edge_cache"] = new[] { "msedge" },
+            ["chrome_cache"] = new[] { "chrome" },
+            ["firefox_cache"] = new[] { "firefox" },
+            ["brave_cache"] = new[] { "brave" },
+            ["opera_cache"] = new[] { "opera" },
+            ["quark_cache"] = new[] { "Quark" },
+            ["androws_cef_cache"] = new[] { "Androws" },
+            ["github_cache"] = new[] { "GitHubDesktop" },
+            ["browser360_cache"] = new[] { "360Chrome" },
+            ["sogou_cache"] = new[] { "SogouExplorer", "SogouBrowser" },
+            ["qq_browser_cache"] = new[] { "QQBrowser" },
+            ["vivaldi_cache"] = new[] { "vivaldi" },
+        };
+
+        // 为浏览器类缓存项注入进程名与关闭命令，并刷新一次运行状态。
+        private void WireBrowserKillButtons()
+        {
+            foreach (var grp in CleanGroups)
+                foreach (var node in grp.Children)
+                    if (node is CleanItem ci && BrowserProcessNames.TryGetValue(ci.Id, out var procs))
+                    {
+                        ci.RelatedProcessNames = procs;
+                        ci.KillAndCleanCommand = KillBrowserAndCleanCommand;
+                    }
+            RefreshBrowserProcessStates();
+        }
+
+        // 刷新所有已配置进程名的清理项的“是否运行中”状态。
+        private void RefreshBrowserProcessStates()
+        {
+            foreach (var grp in CleanGroups)
+                foreach (var node in grp.Children)
+                    if (node is CleanItem ci && ci.RelatedProcessNames?.Length > 0)
+                        ci.RefreshProcessState();
+        }
+
+        private RelayCommand _killBrowserAndCleanCommand;
+        public RelayCommand KillBrowserAndCleanCommand => _killBrowserAndCleanCommand ??= new RelayCommand(obj =>
+        {
+            var item = obj as CleanItem;
+            KillBrowserAndClean(item);
+        });
+
+        // 点击「查看失败详情」：弹出独立窗口展示说明 / 将清理位置 / 失败明细（替代 ToolTip 内无法滚动的长列表）。
+        private static RelayCommand _showFailureDetailsCommand;
+        public static RelayCommand ShowFailureDetailsCommand => _showFailureDetailsCommand ??= new RelayCommand(obj =>
+        {
+            if (obj is CleanItem item)
+            {
+                var win = new FailureDetailsWindow(item)
+                {
+                    Owner = Application.Current?.MainWindow
+                };
+                win.Show();
+            }
+        });
+
+        // 点击“关闭并清理”按钮：先确认（避免误关丢失未保存内容），再杀进程后清理本项。
+        private void KillBrowserAndClean(CleanItem item)
+        {
+            if (item == null || !item.CanKillAndClean) return;
+            if (item.Status == ScanStatus.Cleaning) return;
+
+            var confirm = MessageBox.Show(
+                $"即将关闭“{item.Name}”对应的进程以清理其缓存，未保存的内容可能丢失。确定继续？",
+                "关闭程序并清理", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes) return;
+
+            _ = KillBrowserAndCleanAsync(item);
+        }
+
+        private async Task KillBrowserAndCleanAsync(CleanItem item)
+        {
+            if (IsBusy) return;
+            SetIsBusy(true);
+            try
+            {
+                // 1) 杀掉关联进程
+                await Task.Run(() =>
+                {
+                    foreach (var name in item.RelatedProcessNames ?? Array.Empty<string>())
+                    {
+                        try
+                        {
+                            foreach (var p in Process.GetProcessesByName(name))
+                            {
+                                try { if (!p.HasExited) p.Kill(); } catch { }
+                            }
+                        }
+                        catch { }
+                    }
+                });
+
+                // 2) 等待文件句柄释放
+                await Task.Delay(600);
+
+                // 3) 刷新运行状态（按钮应隐藏）
+                item.RefreshProcessState();
+
+                // 4) 执行本项清理
+                await Task.Run(() => CleanSingleItem(item));
+
+                // 5) 再次刷新（进程可能自启，按钮按实情显示）
+                item.RefreshProcessState();
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error($"关闭并清理失败: {item.Name}", ex);
+            }
+            finally
+            {
+                SetIsBusy(false);
+            }
+        }
+
+        // 单条清理项的执行逻辑（主流程并行循环与“关闭并清理”命令共用）。
+        private void CleanSingleItem(CleanItem item)
+        {
+            try
+            {
+                _uiDispatcher?.Invoke(() =>
+                {
+                    item.Status = ScanStatus.Cleaning;
+                    CleanProgressText = $"正在清理：{item.Name}";
+                });
+
+                CleanService.CleanResult result = default;
+                bool hasResultAware = item.CleanActionWithResult != null;
+
+                if (hasResultAware)
+                {
+                    result = item.CleanActionWithResult();
+                }
+                else
+                {
+                    item.CleanAction?.Invoke();
+                    result = new CleanService.CleanResult { FilesSucceeded = 1 };
+                }
+
+                _uiDispatcher?.Invoke(() =>
+                {
+                    if (result.FullySucceeded || (result.NoOperation && !hasResultAware))
+                    {
+                        item.Status = ScanStatus.Cleaned;
+                        item.ErrorMessage = null;
+                        item.Details = null;
+                    }
+                    else if (result.PartiallySucceeded)
+                    {
+                        item.Status = ScanStatus.PartiallyCleaned;
+                        item.ErrorMessage = result.ToString();
+                        item.Details = result.GetFailureDetails();
+                    }
+                    else if (result.FullyFailed)
+                    {
+                        item.Status = ScanStatus.Error;
+                        item.ErrorMessage = result.ToString();
+                        item.Details = result.GetFailureDetails();
+                        item.IsChecked = false;
+                    }
+                    else if (result.NoOperation)
+                    {
+                        item.Status = ScanStatus.Cleaned;
+                        item.ErrorMessage = null;
+                        item.Details = null;
+                    }
+                    else
+                    {
+                        item.Status = ScanStatus.Cleaned;
+                        item.ErrorMessage = null;
+                        item.Details = null;
+                    }
+
+                    CleanFileCount++;
+                    CleanProgressText = item.Status == ScanStatus.Cleaned ? $"已清理：{item.Name}"
+                        : item.Status == ScanStatus.PartiallyCleaned ? $"部分清理：{item.Name}"
+                        : $"失败：{item.Name}";
+                });
+            }
+            catch (Exception ex)
+            {
+                _uiDispatcher?.Invoke(() =>
+                {
+                    item.ErrorMessage = ex.Message;
+                    item.Details = null;
+                    item.Status = ScanStatus.Error;
+                    item.IsChecked = false;
+                    CleanFileCount++;
+                    CleanProgressText = $"失败：{item.Name}";
+                });
+                _logger.Error($"清理失败: {item.Name}", ex);
+            }
+        }
+
+        // canClean 缺省统一为「始终可清理」(() => true)，仅少数项（系统升级中、目录存在性等）传入自定义谓词
+        private static CleanItem MakeCleanItem(string id, string name, string desc, RiskLevel risk, Func<CleanService.CleanResult> clean, Func<bool> canClean = null)
+        {
+            canClean ??= () => true;
             var item = new CleanItem
             {
                 Id = id,
@@ -286,20 +556,22 @@ namespace DiskCleaner.ViewModels
                 Risk = risk,
                 CanClean = canClean,
                 IsEnabled = risk != RiskLevel.Forbidden,
-                IsChecked = risk == RiskLevel.Safe
+                IsChecked = false 
             };
-            // 新路径：直接使用返回 CleanResult 的清理动作，提供细粒度部分成功报告
+            
             item.CleanActionWithResult = clean;
+            item.ShowFailureDetailsCommand = ShowFailureDetailsCommand;
             return item;
         }
 
-        /// <summary>
-        /// 重载：接受传统的不返回值清理动作（void 方法组会自动匹配此重载，因为
-        /// void 方法无法转换为 Func&lt;CleanResult&gt;）。此类项不提供细粒度部分成功报告，
-        /// CleanAsync 会回退为“执行 + 异常捕获”模式：成功标 Cleaned，抛异常标 Error。
-        /// </summary>
-        private static CleanItem MakeCleanItem(string id, string name, string desc, RiskLevel risk, Action clean, Func<bool> canClean)
+        
+        
+        
+        
+        
+        private static CleanItem MakeCleanItem(string id, string name, string desc, RiskLevel risk, Action clean, Func<bool> canClean = null)
         {
+            canClean ??= () => true;
             var item = new CleanItem
             {
                 Id = id,
@@ -308,16 +580,273 @@ namespace DiskCleaner.ViewModels
                 Risk = risk,
                 CanClean = canClean,
                 IsEnabled = risk != RiskLevel.Forbidden,
-                IsChecked = risk == RiskLevel.Safe
+                IsChecked = false 
             };
             item.CleanAction = clean;
             item.CleanActionWithResult = null;
+            item.ShowFailureDetailsCommand = ShowFailureDetailsCommand;
             return item;
         }
 
-        // ---------- 叶子项清理动作 ----------
+        #region 各清理项「将清理的顶层目录 / 注册表项」映射（供 ⓘ ToolTip 展示）
 
-        /// <summary>聚合多个清理结果为一个。</summary>
+        private static Dictionary<string, string[]> _targetRoots;
+        private static Dictionary<string, string[]> TargetRoots
+        {
+            get
+            {
+                if (_targetRoots == null) _targetRoots = BuildTargetRoots();
+                return _targetRoots;
+            }
+        }
+
+        // 返回该清理项「将清理的顶层目录 / 注册表项」清单（显示用，非逐文件枚举）。
+        private static List<string> GetItemTargetRoots(string id)
+        {
+            if (string.IsNullOrEmpty(id)) return null;
+            return TargetRoots.TryGetValue(id, out var arr) && arr != null && arr.Length > 0
+                ? new List<string>(arr) : null;
+        }
+
+        private static Dictionary<string, string[]> BuildTargetRoots()
+        {
+            var win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var user = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var x86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+            var common = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            var temp = Path.GetTempPath();
+            var sysDrive = Path.GetPathRoot(win) ?? "C:\\";
+            var dict = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+
+            // 应用日志类（直接复用 AppLogDirectories 映射）
+            foreach (var kvp in AppLogDirectories())
+                dict[kvp.Key] = kvp.Value;
+
+            // —— 系统清理 ——
+            dict["temp_files"] = new[] { Path.Combine(win, "Temp"), temp };
+            dict["minidumps"] = new[] { Path.Combine(win, "Minidump"), Path.Combine(win, "*.dmp") };
+            dict["windows_logs"] = new[] { Path.Combine(win, "Logs") };
+            dict["driver_packages"] = new[] { "孤立的旧设备驱动包（oem*.inf，通过 pnputil /delete-driver 卸载，不影响在用驱动）" };
+            dict["thumbnail_cache"] = new[] { Path.Combine(local, @"Microsoft\Windows\Explorer") + "（thumbcache_*.db / iconcache_*.db）" };
+            dict["inet_cache"] = new[] { Path.Combine(local, @"Microsoft\Windows\INetCache") };
+            dict["wer"] = new[] { Path.Combine(common, @"Microsoft\Windows\WER") };
+            dict["delivery_optimization"] = new[] { Path.Combine(win, @"SoftwareDistribution\DeliveryOptimization"), Path.Combine(win, @"SoftwareDistribution\Download") };
+            dict["windows_widgets"] = new[] { Path.Combine(local, @"Packages\MicrosoftWindows.Client.WebExperience_cw5n1h2txyewy\LocalCache") };
+            dict["directx_shader_cache"] = new[] { Path.Combine(local, "D3DSCache") };
+            dict["cert_cache"] = new[] { Path.Combine(local, @"Microsoft\CryptnetUrlCache") };
+            dict["prefetch"] = new[] { Path.Combine(win, "Prefetch") };
+            dict["memory_dump"] = new[] { Path.Combine(win, "MEMORY.DMP") };
+            dict["store_cache"] = new[] { Path.Combine(local, "Packages") + "（仅 Microsoft.WindowsStore* 的 LocalCache）" };
+            dict["windows_upgrade_temp"] = new[] { Path.Combine(sysDrive, "$WINDOWS.~BT"), Path.Combine(sysDrive, "$WINDOWS.~WS"), Path.Combine(sysDrive, "$WINDOWS.~Q") };
+            dict["defender_history"] = new[] { Path.Combine(common, @"Microsoft\Windows Defender\Scans\History") };
+            dict["font_cache"] = new[] { Path.Combine(win, @"ServiceProfiles\LocalService\AppData\Local\FontCache") };
+            dict["live_kernel_reports"] = new[] { Path.Combine(win, "LiveKernelReports") };
+            dict["icon_cache"] = new[] { Path.Combine(local, "IconCache.db") };
+
+            // —— 浏览器 / 应用缓存 ——
+            dict["edge_cache"] = new[] { Path.Combine(local, @"Microsoft\Edge\User Data") + "（Cache / Code Cache）" };
+            dict["edge_update_cache"] = new[] { Path.Combine(x86, @"Microsoft\EdgeUpdate\Download") };
+            dict["edge_bak"] = new[] { Path.Combine(local, @"Microsoft\Edge\User Data") + "（*.bak 备份文件）" };
+            dict["chrome_cache"] = new[] { Path.Combine(local, @"Google\Chrome\User Data") + "（Cache / Code Cache / Media Cache）" };
+            dict["firefox_cache"] = new[] { Path.Combine(local, @"Mozilla\Firefox\Profiles") + "（各 Profile 的 cache2 / thumbnails / cache）" };
+            dict["brave_cache"] = new[] { Path.Combine(local, @"BraveSoftware\Brave-Browser\User Data") + "（Cache / Code Cache）" };
+            dict["opera_cache"] = new[] { Path.Combine(local, @"Opera Software") + "（各浏览器目录的 Cache / Code Cache）" };
+            dict["quark_cache"] = new[] {
+                Path.Combine(local, @"Quark\User Data"), Path.Combine(local, @"Quark\Quark\User Data"),
+                Path.Combine(local, @"夸克浏览器\User Data"), Path.Combine(local, @"Quark\Application\Cache") };
+            dict["androws_cef_cache"] = new[] { Path.Combine(roaming, @"Tencent\Androws\cef\CEF_Androws") };
+            dict["legacy_edge_cache"] = new[] { Path.Combine(local, @"Microsoft\Windows\WebCache") };
+            dict["ie_cache"] = new[] { Path.Combine(local, @"Microsoft\Windows\WebCache") };
+            dict["github_cache"] = new[] { Path.Combine(roaming, @"GitHub Desktop\Cache") + "（Cache_Data / No_Vary_Search）" };
+            dict["dingtalk_cache"] = new[] { Path.Combine(local, @"DingTalk\Cache"), Path.Combine(local, @"DingTalk\update") };
+            dict["netease_cache"] = new[] { Path.Combine(local, @"NetEase\CloudMusic\Cache") };
+            dict["steam_cache"] = new[] { Path.Combine(x86, @"Steam\appcache"), Path.Combine(x86, @"Steam\httpcache"), Path.Combine(x86, @"Steam\config\htmlcache") };
+            dict["baidu_pan_cache"] = new[] { Path.Combine(local, @"Baidu\BaiduNetdisk\cache"), Path.Combine(local, @"Baidu\BaiduNetdisk\tmp") };
+            dict["thunder_cache"] = new[] { Path.Combine(local, @"Thunder Network\Thunder\Profiles\Cache"), Path.Combine(local, @"Thunder Network\XLLiveUD\Cache") };
+            dict["bilibili_cache"] = new[] { Path.Combine(local, @"bilibili\Cache"), Path.Combine(local, @"Bilibili\Cache") };
+            dict["iqiyi_cache"] = new[] { Path.Combine(local, @"Qiyi\QiyiClient\cache"), Path.Combine(local, @"Qiyi\QiyiClient\webcache") };
+            dict["discord_cache"] = new[] { Path.Combine(local, @"Discord\Cache"), Path.Combine(local, @"Discord\Code Cache"), Path.Combine(local, @"Discord\GPUCache") };
+            dict["browser360_cache"] = new[] { Path.Combine(local, @"360Chrome\Chrome\User Data") + "（Cache / Code Cache）" };
+            dict["sogou_cache"] = new[] { Path.Combine(local, @"SogouExplorer\Cache"), Path.Combine(local, @"SogouExplorer\WebkitCache") };
+            dict["feishu_cache"] = new[] { Path.Combine(local, @"Feishu\Cache"), Path.Combine(local, @"Feishu\Application\Cache"), Path.Combine(local, @"Feishu\user_data\cache") };
+            dict["wemeet_cache"] = new[] { Path.Combine(local, @"Tencent\WeMeet\Cache"), Path.Combine(local, @"Tencent\WeMeet\AppCache") };
+            dict["jianying_cache"] = new[] { Path.Combine(local, @"JianyingPro\Cache"), Path.Combine(local, @"JianyingPro\User Data\Cache"), Path.Combine(local, @"JianyingPro\User Data\GPUCache") };
+            dict["telegram_cache"] = new[] { Path.Combine(roaming, @"Telegram Desktop\data\cache"), Path.Combine(roaming, @"Telegram Desktop\data\media_cache") };
+            dict["spotify_cache"] = new[] { Path.Combine(local, @"Spotify\cache"), Path.Combine(roaming, @"Spotify\Storage") };
+            dict["adobe_cache"] = new[] { Path.Combine(local, @"Adobe\Common\Media Cache Files"), Path.Combine(local, @"Adobe\Common\Media Cache"), Path.Combine(local, @"Adobe\Premiere Pro") + "（各版本 Media Cache Files）" };
+            dict["kuaishou_cache"] = new[] { Path.Combine(local, @"Kuaishou\Cache"), Path.Combine(local, @"Kuaishou\Application\Cache") };
+            dict["wechat_cache"] = new[] { Path.Combine(user, @"Documents\WeChat Files") + @"（各账号 FileStorage\Cache）", Path.Combine(local, @"Tencent\WeChat") + @"（各账号 FileStorage\Cache）" };
+            dict["qq_cache"] = new[] { Path.Combine(user, @"Documents\Tencent Files") + "（各账号 RichMedia）", Path.Combine(local, @"Tencent\QQ\Cache"), Path.Combine(local, @"Tencent\QQ\Code Cache"), Path.Combine(local, @"Tencent\QQ\GPUCache") };
+            dict["wxwork_cache"] = new[] { Path.Combine(user, @"Documents\WXWork") + "（各账号 Cache）" };
+            dict["mailmaster_cache"] = new[] { Path.Combine(local, @"MailMaster\Cache"), Path.Combine(local, @"MailMaster\Application\Cache") };
+            dict["qq_browser_cache"] = new[] { Path.Combine(local, @"Tencent\QQBrowser\User Data") + "（Cache / Code Cache）" };
+            dict["vivaldi_cache"] = new[] { Path.Combine(local, @"Vivaldi\User Data") + "（Cache / Code Cache）" };
+            dict["qq_music_cache"] = new[] { Path.Combine(local, @"Tencent\QQMusic\Cache"), Path.Combine(local, @"QQMusic\Cache") };
+            dict["kugou_cache"] = new[] { Path.Combine(local, @"KuGou\Cache"), Path.Combine(local, @"KuGou8\Cache") };
+            dict["kuwo_cache"] = new[] { Path.Combine(local, @"KuwoMusic\Cache"), Path.Combine(local, @"Kuwo\Cache") };
+            dict["qqlive_cache"] = new[] { Path.Combine(local, @"Tencent\QQLive\Cache"), Path.Combine(local, @"QQLive\Cache") };
+            dict["youku_cache"] = new[] { Path.Combine(local, @"Youku\YoukuClient\cache"), Path.Combine(local, @"Youku\cache") };
+            dict["wps_cache"] = new[] { Path.Combine(local, @"Kingsoft\office6\cache"), Path.Combine(local, @"WPS\cache") };
+            dict["epic_cache"] = new[] { Path.Combine(local, @"Epic\EpicGamesLauncher\Data\EMS\cache"), Path.Combine(local, @"Epic\EpicGamesLauncher\Data\EMS\EPIC"), Path.Combine(local, @"Epic\EpicGamesLauncher\WebCache") };
+            dict["vscode_cache"] = new[] { Path.Combine(roaming, @"Code\Cache"), Path.Combine(roaming, @"Code\CachedData"), Path.Combine(roaming, @"Code\Code Cache"), Path.Combine(roaming, @"Code\GPUCache") };
+            dict["jetbrains_cache"] = new[] { Path.Combine(local, @"JetBrains") + "（各产品的 caches / log / tmp / index）", Path.Combine(local, @"Google\AndroidStudio") + "（各版本 caches / log / tmp / index）" };
+            dict["vs_component_cache"] = new[] { Path.Combine(local, @"Microsoft\VisualStudio") + "（各版本 ComponentModelCache / MEFCache）" };
+            dict["npm_cache"] = new[] { Path.Combine(local, "npm-cache") };
+            dict["pip_cache"] = new[] { Path.Combine(local, @"pip\cache") };
+            dict["maven_cache"] = new[] { Path.Combine(user, @".m2\repository") };
+            dict["gradle_cache"] = new[] { Path.Combine(user, @".gradle\caches") };
+            dict["nuget_cache"] = new[] { Path.Combine(local, @"NuGet\v3-cache"), Path.Combine(local, @"NuGet\Cache") };
+
+            // —— Windows 使用痕迹 ——
+            dict["etw_logs"] = new[] { Path.Combine(win, @"System32\LogFiles\WMI\RtBackup"), Path.Combine(win, @"Logs\MeasuredBoot") };
+            dict["recent_items"] = new[] { Path.Combine(user, "Recent"), Path.Combine(roaming, @"Microsoft\Windows\Recent\AutomaticDestinations"), Path.Combine(roaming, @"Microsoft\Windows\Recent\CustomDestinations") };
+            dict["clipboard_history"] = new[] { Path.Combine(local, @"Microsoft\Windows\Clipboard") };
+            dict["explorer_traces"] = new[] {
+                @"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs",
+                @"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU",
+                @"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\TypedPaths",
+                @"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\UserAssist",
+                @"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\OpenSaveMRU",
+                @"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\LastVisitedMRU",
+                @"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\CIDSizeMRU" };
+            dict["empty_recycle_bin"] = new[] { "回收站（所有磁盘）" };
+
+            // —— 无效注册表项类 ——
+            dict["invalid_startup"] = new[] {
+                @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+                @"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run",
+                @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce",
+                @"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+                @"启动文件夹（所有用户 / 当前用户）" };
+            dict["invalid_com"] = new[] {
+                @"HKCR\CLSID", @"HKCR\Wow6432Node\CLSID",
+                @"HKLM\SOFTWARE\Classes\CLSID", @"HKLM\SOFTWARE\WOW6432Node\Classes\CLSID",
+                @"HKCU\Software\Classes\CLSID" };
+            dict["invalid_uninstall"] = new[] {
+                @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+                @"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall" };
+            dict["invalid_context_menu"] = new[] {
+                @"HKCU\Software\Classes\*\shell", @"HKCU\Software\Classes\*\shellex\ContextMenuHandlers",
+                @"HKCU\Software\Classes\Directory\shell", @"HKCU\Software\Classes\Directory\Background\shell",
+                @"HKCU\Software\Classes\Folder\shell", @"HKCU\Software\Classes\Drive\shell", @"HKCU\Software\Classes\DesktopBackground\shell",
+                @"HKLM\Software\Classes\*\shell", @"HKLM\Software\Classes\*\shellex\ContextMenuHandlers",
+                @"HKLM\Software\Classes\Directory\shell", @"HKLM\Software\Classes\Directory\Background\shell",
+                @"HKLM\Software\Classes\Folder\shell", @"HKLM\Software\Classes\Drive\shell", @"HKLM\Software\Classes\DesktopBackground\shell" };
+            dict["invalid_file_association"] = new[] {
+                @"HKCR\Applications（HKLM/HKCU\Software\Classes\Applications 合并视图）",
+                @"HKLM\SOFTWARE\Classes\Applications",
+                @"HKLM\SOFTWARE\WOW6432Node\Classes\Applications",
+                @"HKCU\Software\Classes\Applications",
+                @"HKCU\Software\WOW6432Node\Classes\Applications",
+                @"HKCR\.<扩展名>（.txt/.jpg/.mp3 等，实际扫描 HKLM/HKCU\Software\Classes 下所有 .xxx）",
+                @"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.<扩展名>\OpenWithProgids / OpenWithList",
+                @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.<扩展名>\OpenWithProgids / OpenWithList",
+                @"HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths",
+                @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths",
+                @"HKCU\SOFTWARE\RegisteredApplications",
+                @"HKLM\SOFTWARE\RegisteredApplications" };
+            dict["invalid_shared_dlls"] = new[] {
+                @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\SharedDLLs",
+                @"HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\SharedDLLs" };
+            dict["invalid_mui_cache"] = new[] {
+                @"HKCU\Software\Classes\Local Settings\MuiCache", @"HKLM\SOFTWARE\Classes\MuiCache" };
+            dict["invalid_appcompat_layers"] = new[] {
+                @"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers",
+                @"HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers" };
+            dict["invalid_appcompat_store"] = new[] {
+                @"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store",
+                @"HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store" };
+            dict["invalid_firewall_rule"] = new[] {
+                @"HKLM\SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules" };
+
+            return dict;
+        }
+
+        #endregion
+
+        #region 应用日志清理（新建「应用日志清理」分组，复用 *_cache 软件清单）
+
+        
+        
+        
+        
+        
+        private static Dictionary<string, string[]> AppLogDirectories()
+        {
+            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var user = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+            {
+                
+                ["edge_logs"] = new[] { Path.Combine(local, @"Microsoft\Edge\User Data\Crashpad\reports"), Path.Combine(local, @"Microsoft\Edge\Logs") },
+                ["chrome_logs"] = new[] { Path.Combine(local, @"Google\Chrome\User Data\Crashpad\reports"), Path.Combine(local, @"Google\Chrome\Logs") },
+                ["firefox_logs"] = new[] { Path.Combine(local, @"Mozilla\Firefox\Crash Reports"), Path.Combine(local, @"Mozilla\Crash Reports") },
+                ["brave_logs"] = new[] { Path.Combine(local, @"BraveSoftware\Brave-Browser\User Data\Crashpad\reports") },
+                ["opera_logs"] = new[] { Path.Combine(local, @"Opera Software\Opera Stable\Crashpad\reports"), Path.Combine(local, @"Opera Software\Opera GX\Crashpad\reports") },
+                ["browser360_logs"] = new[] { Path.Combine(local, @"360Chrome\Chrome\User Data\Crashpad\reports") },
+                ["sogou_logs"] = new[] { Path.Combine(local, @"SogouExplorer\Crashpad\reports"), Path.Combine(local, @"SogouExplorer\Log") },
+                ["qqbrowser_logs"] = new[] { Path.Combine(local, @"Tencent\QQBrowser\User Data\Crashpad\reports") },
+                ["vivaldi_logs"] = new[] { Path.Combine(local, @"Vivaldi\User Data\Crashpad\reports") },
+                ["quark_logs"] = new[] { Path.Combine(local, @"Quark\Quark\User Data\Crashpad\reports"), Path.Combine(local, @"Quark\Application\logs") },
+                
+                ["wechat_logs"] = new[] { Path.Combine(local, @"Tencent\WeChat\xlog") },
+                ["qq_logs"] = new[] { Path.Combine(local, @"Tencent\QQ\Logs"), Path.Combine(local, @"Tencent\QQ\NTQQ\log") },
+                ["wxwork_logs"] = new[] { Path.Combine(local, @"Tencent\WXWork\Logs") },
+                ["dingtalk_logs"] = new[] { Path.Combine(local, @"DingTalk\logs"), Path.Combine(local, @"DingTalk\Log") },
+                ["feishu_logs"] = new[] { Path.Combine(local, @"Feishu\logs"), Path.Combine(local, @"Feishu\Log") },
+                ["discord_logs"] = new[] { Path.Combine(roaming, @"discord\logs") },
+                ["telegram_logs"] = new[] { Path.Combine(local, @"Telegram Desktop\logs") },
+                ["mailmaster_logs"] = new[] { Path.Combine(local, @"MailMaster\logs") },
+                
+                ["vscode_logs"] = new[] { Path.Combine(roaming, @"Code\logs") },
+                ["npm_logs"] = new[] { Path.Combine(user, @".npm\_logs") },
+                
+                ["netease_logs"] = new[] { Path.Combine(local, @"NetEase\CloudMusic\logs") },
+                ["qqmusic_logs"] = new[] { Path.Combine(local, @"Tencent\QQMusic\logs") },
+                ["kugou_logs"] = new[] { Path.Combine(local, @"KuGou\log") },
+                ["kuwo_logs"] = new[] { Path.Combine(local, @"KuwoMusic\log") },
+                ["qqlive_logs"] = new[] { Path.Combine(local, @"Tencent\QQLive\logs") },
+                ["youku_logs"] = new[] { Path.Combine(local, @"Youku\logs") },
+                ["iqiyi_logs"] = new[] { Path.Combine(local, @"IQIYI\log"), Path.Combine(local, @"iqiyi\logs") },
+                ["bilibili_logs"] = new[] { Path.Combine(local, @"bilibili\logs"), Path.Combine(local, @"Bilibili\logs") },
+                ["kuaishou_logs"] = new[] { Path.Combine(local, @"Kuaishou\logs") },
+                
+                ["thunder_logs"] = new[] { Path.Combine(local, @"Thunder Network\Thunder\Logs") },
+                ["baidupan_logs"] = new[] { Path.Combine(local, @"BaiduNetdisk\logs") },
+                ["steam_logs"] = new[] { Path.Combine(local, @"Steam\logs"), Path.Combine(local, @"Steam\log") },
+                ["spotify_logs"] = new[] { Path.Combine(local, @"Spotify\logs") },
+                ["wemeet_logs"] = new[] { Path.Combine(local, @"Tencent\WeMeet\logs") },
+                ["jianying_logs"] = new[] { Path.Combine(local, @"JianyingPro\logs") },
+                ["androws_logs"] = new[] { Path.Combine(roaming, @"Tencent\Androws\ams_cache\log") },
+                ["epic_logs"] = new[] { Path.Combine(local, @"Epic\EpicGamesLauncher\Saved\Logs") }
+            };
+        }
+
+        private static long AppLogDirsSize(string[] dirs)
+        {
+            long total = 0;
+            foreach (var d in dirs)
+                if (Directory.Exists(d)) total += DirSize(d);
+            return total;
+        }
+
+        private CleanService.CleanResult CleanAppLog(string id)
+        {
+            if (!AppLogDirectories().TryGetValue(id, out var dirs)) return default;
+            var results = new List<CleanService.CleanResult>();
+            foreach (var d in dirs)
+                if (Directory.Exists(d)) results.Add(CleanService.DeleteDirContents(d, _logger));
+            return Aggregate(results.ToArray());
+        }
+
+        #endregion
+
+        
+
+        
         private static CleanService.CleanResult Aggregate(params CleanService.CleanResult[] results)
         {
             var r = new CleanService.CleanResult();
@@ -330,6 +859,12 @@ namespace DiskCleaner.ViewModels
                     BytesFreed = r.BytesFreed + res.BytesFreed,
                     ScheduledForReboot = r.ScheduledForReboot + res.ScheduledForReboot
                 };
+                if (res.FailedPaths != null && res.FailedPaths.Count > 0)
+                {
+                    var list = r.FailedPaths ?? System.Collections.Immutable.ImmutableList<string>.Empty;
+                    foreach (var p in res.FailedPaths) list = list.Add(p);
+                    r = r with { FailedPaths = list };
+                }
             }
             return r;
         }
@@ -337,9 +872,9 @@ namespace DiskCleaner.ViewModels
         private CleanService.CleanResult CleanTempFiles()
         {
             var winTemp = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Temp");
-            // 临时文件属“可安全永久删除”的垃圾，业界工具（CCleaner 等）均直接删除，无需回收站。
-            // 直接删除可彻底绕开 SHFileOperation 在 STA 线程上的慢/卡路径，速度数量级提升，
-            // 也避免“回收站模式”下数万文件逐批串行发送导致清理长时间停在“清理中”。
+            
+            
+            
             var r1 = CleanService.DeleteDirContents(winTemp, _logger, false, null);
             var r2 = CleanService.DeleteDirContents(Path.GetTempPath(), _logger, false, null);
             return Aggregate(r1, r2);
@@ -354,7 +889,7 @@ namespace DiskCleaner.ViewModels
                     result = Aggregate(result, TryDeleteFile(f));
             foreach (var f in Directory.GetFiles(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "*.dmp"))
             {
-                // MEMORY.DMP 由独立的 memory_dump 清理项处理，避免重复删除与重复计数
+                
                 if (string.Equals(Path.GetFileName(f), "MEMORY.DMP", StringComparison.OrdinalIgnoreCase)) continue;
                 result = Aggregate(result, TryDeleteFile(f));
             }
@@ -373,18 +908,18 @@ namespace DiskCleaner.ViewModels
             return CleanService.DeleteDirContents(Path.Combine(local, @"Microsoft\Windows\INetCache"), _logger);
         }
 
-        /// <summary>
-        /// 通用浏览器多 Profile 缓存清理。
-        /// Chromium 内核浏览器（Chrome/Edge/Brave/360/...）的 User Data 目录下通常包含多个 Profile：
-        /// Default、Profile 1、Profile 2、...、Profile N、Guest Profile、System Profile。
-        /// 每个 Profile 内有独立的 Cache/Code Cache/Media Cache/GPUCache 目录，
-        /// 而 Local State、Login Data、Cookies 等用户核心数据位于 User Data 根目录（本函数绝不触碰）。
-        /// 仅当目录名符合 Profile 命名规范（或 flatten=true 时把传入目录本身当一个 profile）时，
-        /// 才在其下查找并清理传入的 cacheSubdir 子目录。
-        /// </summary>
-        /// <param name="userDataRoot">Chromium User Data 根目录</param>
-        /// <param name="cacheSubdirs">每个 Profile 下要清理的缓存子目录名（如 "Cache"、"Code Cache"）</param>
-        /// <param name="flatten">true 时把 userDataRoot 本身视为一个 Profile 目录（用于 Opera 这种不嵌套 User Data 的布局）</param>
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         private static CleanService.CleanResult CleanBrowserProfileCaches(string userDataRoot, string[] cacheSubdirs, bool flatten = false)
         {
             if (!Directory.Exists(userDataRoot)) return default;
@@ -425,13 +960,13 @@ namespace DiskCleaner.ViewModels
             return results.Count > 0 ? Aggregate(results.ToArray()) : default;
         }
 
-        /// <summary>
-        /// 按扩展名白名单清理目录内容（递归删除文件，空子目录收尾清理）。
-        /// 只有文件扩展名在 allowedExtensions 中的才会被删除，其余文件一律保留。
-        /// 相比 DeleteDirContents 的全量清理，更安全——用于 Telegram/Adobe 这类缓存目录
-        /// 里混杂了用户数据/索引数据库的场景。
-        /// 重解析点（junction/symlink/mount point）仍然跳过，不跟随进入。
-        /// </summary>
+        
+        
+        
+        
+        
+        
+        
         private static void CleanDirByExtensionWhitelist(string path, HashSet<string> allowedExtensions, ILogger logger)
         {
             if (!Directory.Exists(path)) return;
@@ -453,7 +988,7 @@ namespace DiskCleaner.ViewModels
                         logger?.Error($"白名单清理文件失败: {f}", ex);
                     }
                 }
-                // 最后清理因删除文件变空的子目录（非递归，从底层向上）
+                
                 TryDeleteEmptySubdirs(path);
             }
             catch (Exception ex)
@@ -462,16 +997,16 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 安全递归收集文件（跳过重解析点子目录），与 CleanService 内部逻辑一致。
-        /// </summary>
+        
+        
+        
         private static void CollectFilesRecursivelySafe(string path, List<string> files, ILogger logger)
         {
             try
             {
-                // 单次枚举 + 原生跳过 reparse 点（junction/symlink/mount），避免
-                // 逐文件 EnumerateFiles + 每子目录单独 IsReparsePoint 各做一次 stat。
-                // FileSystemInfo.Length/Attributes 在 Windows 目录枚举时已由 FindFirstFile 缓存，无需再次 stat。
+                
+                
+                
                 var opts = new EnumerationOptions
                 {
                     RecurseSubdirectories = false,
@@ -492,9 +1027,9 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 估算目录中指定扩展名文件的总大小（与 CleanDirByExtensionWhitelist 的清理范围一致）。
-        /// </summary>
+        
+        
+        
         private static long DirSizeByExtensionWhitelist(string path, HashSet<string> allowedExtensions)
         {
             if (!Directory.Exists(path)) return 0;
@@ -519,21 +1054,21 @@ namespace DiskCleaner.ViewModels
             return size;
         }
 
-        /// <summary>
-        /// 自下而上清理空的子目录（不碰根目录本身）。
-        /// 安全保护与 CleanService.DeleteEmptySubdirectories 保持一致：
-        ///   - 只删真正为空的目录（GetFileSystemEntries 返回 0）
-        ///   - 跳过重解析点（junction/symlink/mount point）
-        ///   - 跳过系统属性目录
-        ///   - 清除只读属性后再删
-        ///   - 使用 Directory.Delete(dir, false) 非递归删除（仅删空目录，非空会抛异常被 catch）
-        /// </summary>
+        
+        
+        
+        
+        
+        
+        
+        
+        
         private static void TryDeleteEmptySubdirs(string root)
         {
             try
             {
-                // 单次枚举 + 原生跳过 reparse 点（junction/symlink/mount），避免
-                // Directory.GetDirectories 全量数组 + 每目录单独 IsReparsePoint 再做一次 GetAttributes stat。
+                
+                
                 var emptyOpts = new EnumerationOptions
                 {
                     RecurseSubdirectories = false,
@@ -547,21 +1082,21 @@ namespace DiskCleaner.ViewModels
                     try
                     {
                         if (!Directory.Exists(dir)) continue;
-                        // 一次属性读取同时用于 reparse / 系统 / 只读判断，避免重复 stat。
+                        
                         var attr = dirInfo.Attributes;
-                        // 跳过重解析点（junction/symlink/mount point），避免跟随链接误删目标
+                        
                         if ((attr & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint)
                             continue;
-                        // 跳过系统属性目录，与 CleanService 一致
+                        
                         if ((attr & FileAttributes.System) == FileAttributes.System)
                             continue;
-                        // 仅删除真正为空的目录（无文件、无子目录）
+                        
                         if (Directory.GetFileSystemEntries(dir, "*", SearchOption.TopDirectoryOnly).Length == 0)
                         {
-                            // 清除只读属性（只读目录无法直接删除）
+                            
                             if ((attr & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
                                 File.SetAttributes(dir, attr & ~FileAttributes.ReadOnly);
-                            // recursive:false —— 仅删空目录本身，不递归
+                            
                             Directory.Delete(dir, false);
                         }
                     }
@@ -578,15 +1113,142 @@ namespace DiskCleaner.ViewModels
             return CleanBrowserProfileCaches(userData, new[] { "Cache", "Code Cache" });
         }
 
+        // EdgeUpdate 下载目录：已应用更新的旧安装包残留，属可安全删除的 stale 安装包（下次更新会重新下载）。
+        private CleanService.CleanResult CleanEdgeUpdateCache()
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                @"Microsoft\EdgeUpdate\Download");
+            if (!Directory.Exists(dir)) return default;
+            return CleanService.DeleteDirContents(dir, _logger);
+        }
+
+        // Edge 用户数据目录下的 *.bak 是浏览器每次修改数据时自动生成的上一版快照备份（如 Bookmarks.bak、Favicons.bak 等）。
+        // 均为冗余备份，删除后会在下次修改时自动重建，不影响当前书签/数据；非缓存、也非用户文档。
+        private CleanService.CleanResult CleanEdgeBak()
+        {
+            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var userData = Path.Combine(local, @"Microsoft\Edge\User Data");
+            if (!Directory.Exists(userData)) return default;
+
+            var profileDirs = new List<string> { userData };
+            try { profileDirs.AddRange(Directory.GetDirectories(userData, "Profile *")); } catch { }
+
+            var result = new CleanService.CleanResult();
+            foreach (var pd in profileDirs)
+            {
+                foreach (var f in Directory.GetFiles(pd, "*.bak"))
+                {
+                    try
+                    {
+                        var len = new FileInfo(f).Length;
+                        File.Delete(f);
+                        result = result with
+                        {
+                            FilesSucceeded = result.FilesSucceeded + 1,
+                            BytesFreed = result.BytesFreed + len
+                        };
+                    }
+                    catch
+                    {
+                        result = result with { FilesFailed = result.FilesFailed + 1 };
+                    }
+                }
+            }
+            return result;
+        }
+
+        // GitHub Desktop 基于 Electron(Chromium)，其 Cache 目录含 Chromium 磁盘缓存(Cache_Data，data_* + index)与 No_Vary_Search 等，均为纯缓存，删除后按需重建。
+        private CleanService.CleanResult CleanGitHubDesktopCache()
+        {
+            var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var cacheRoot = Path.Combine(roaming, @"GitHub Desktop\Cache");
+            if (!Directory.Exists(cacheRoot)) return default;
+            var result = new CleanService.CleanResult();
+            foreach (var sub in new[] { "Cache_Data", "No_Vary_Search" })
+            {
+                var dir = Path.Combine(cacheRoot, sub);
+                if (Directory.Exists(dir))
+                    result = Aggregate(result, CleanService.DeleteDirContents(dir, _logger));
+            }
+            return result;
+        }
+
+        // IE / 传统 Edge 缓存数据库(WebCacheV01.dat，ESE 格式，含 Temporary Internet Files/Cookie/历史索引)。
+        // 该 .dat 平时被 dllhost.exe / explorer 进程独占锁定，登录状态下直接删文件通常因“文件正在使用”而跳过；故 best-effort 删除，清理前建议关闭 IE/浏览器并重启 explorer，或经系统“删除浏览历史记录”清理。
+        private CleanService.CleanResult CleanWebCache()
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                @"Microsoft\Windows\WebCache");
+            if (!Directory.Exists(dir)) return default;
+            return CleanService.DeleteDirContents(dir, _logger);
+        }
+
+        // Quark 不同安装/版本下 User Data 位置不同：标准 `Quark\User Data`、部分版本 `Quark\Quark\User Data`、中文名 `夸克浏览器\User Data`。
+        // 用户实测真实路径为 `Quark\User Data\Default\Cache\Cache_Data`，故首项为标准路径。
+        private static readonly string[] QuarkUserDataRoots = new[]
+        {
+            @"Quark\User Data",
+            @"Quark\Quark\User Data",
+            @"夸克浏览器\User Data",
+        };
+
+        // 仅可安全清理、删除后可重建的缓存类目录（不含 Local Storage / IndexedDB / 扩展 / 会话 / 皮肤 / 证书等用户数据）。
+        private static readonly string[] QuarkCacheSubdirs = new[]
+        {
+            "Cache", "Code Cache", "GPUCache", "image_cache", "blob_storage",
+            "remote_resource_cache", "DawnGraphiteCache", "DawnWebGPUCache",
+            "Shared Dictionary", "Service Worker",
+        };
+
         private CleanService.CleanResult CleanQuarkCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var r1 = CleanBrowserProfileCaches(Path.Combine(local, @"Quark\Quark\User Data"), new[] { "Cache", "Code Cache" });
-            var r2 = CleanBrowserProfileCaches(Path.Combine(local, @"夸克浏览器\User Data"), new[] { "Cache", "Code Cache" });
+            var results = new List<CleanService.CleanResult>();
+            foreach (var root in QuarkUserDataRoots)
+            {
+                var userData = Path.Combine(local, root);
+                if (Directory.Exists(userData))
+                    results.Add(CleanBrowserProfileCaches(userData, QuarkCacheSubdirs));
+            }
             var appCache = Path.Combine(local, @"Quark\Application\Cache");
-            var r3 = Directory.Exists(appCache) ? CleanService.DeleteDirContents(appCache, _logger) : default;
-            return Aggregate(r1, r2, r3);
+            if (Directory.Exists(appCache))
+                results.Add(CleanService.DeleteDirContents(appCache, _logger));
+            return results.Count > 0 ? Aggregate(results.ToArray()) : default;
         }
+
+        // Androws（腾讯应用宝/安卓模拟器）采用 CEF（Chromium 内核）作为内嵌浏览器，其 User Data 位于 Roaming\Tencent\Androws\cef\CEF_Androws。
+        // 下列均为纯缓存/可重建数据：站点特征数据库(Site Characteristics Database)是 Chromium 记录站点交互特征的 leveldb，删除后自动重建；
+        // 其余 Cache/Code Cache/GPUCache 等与各浏览器缓存性质相同，不含用户数据（Local Storage/IndexedDB/扩展/会话等不在此列）。
+        private static readonly string[] AndrowsCefCacheSubdirs = new[]
+        {
+            "Cache", "Code Cache", "GPUCache", "Site Characteristics Database",
+            "image_cache", "blob_storage", "remote_resource_cache",
+            "DawnGraphiteCache", "DawnWebGPUCache", "Shared Dictionary", "Service Worker",
+        };
+
+        private CleanService.CleanResult CleanAndrowsCefCache()
+        {
+            var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var cefRoot = Path.Combine(roaming, @"Tencent\Androws\cef\CEF_Androws");
+            if (!Directory.Exists(cefRoot)) return default;
+            return CleanBrowserProfileCaches(cefRoot, AndrowsCefCacheSubdirs);
+        }
+
+        // 统一助手：清理多个候选目录（存在才删），汇总各目录的清理结果。
+        // 替代各 Clean*Cache 里反复出现的 “new List + foreach + DeleteDirContents + Aggregate” 样板代码。
+        private CleanService.CleanResult CleanCandidateDirs(params string[] dirs)
+        {
+            var results = new List<CleanService.CleanResult>();
+            foreach (var d in dirs)
+                if (Directory.Exists(d)) results.Add(CleanService.DeleteDirContents(d, _logger));
+            return results.Count > 0 ? Aggregate(results.ToArray()) : default;
+        }
+
+        // 统一助手：清理单个目录（目录不存在则视为无需清理）。
+        private CleanService.CleanResult CleanSingleDir(string dir)
+            => Directory.Exists(dir) ? CleanService.DeleteDirContents(dir, _logger) : default;
 
         private CleanService.CleanResult CleanChromeCache()
         {
@@ -631,44 +1293,25 @@ namespace DiskCleaner.ViewModels
         private CleanService.CleanResult CleanDingTalkCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var candidates = new[]
-            {
+            return CleanCandidateDirs(
                 Path.Combine(local, @"DingTalk\Cache"),
-                Path.Combine(local, @"DingTalk\update")
-            };
-            var results = new List<CleanService.CleanResult>();
-            foreach (var c in candidates)
-                if (Directory.Exists(c)) results.Add(CleanService.DeleteDirContents(c, _logger));
-            return results.Count > 0 ? Aggregate(results.ToArray()) : default;
+                Path.Combine(local, @"DingTalk\update"));
         }
 
         private CleanService.CleanResult CleanNetEaseMusicCache()
-        {
-            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var cache = Path.Combine(local, @"NetEase\CloudMusic\Cache");
-            return Directory.Exists(cache) ? CleanService.DeleteDirContents(cache, _logger) : default;
-        }
+            => CleanSingleDir(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"NetEase\CloudMusic\Cache"));
 
         private CleanService.CleanResult CleanSteamCache()
         {
             var x86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
-            var candidates = new[]
-            {
+            return CleanCandidateDirs(
                 Path.Combine(x86, @"Steam\appcache"),
                 Path.Combine(x86, @"Steam\httpcache"),
-                Path.Combine(x86, @"Steam\config\htmlcache")
-            };
-            var results = new List<CleanService.CleanResult>();
-            foreach (var c in candidates)
-                if (Directory.Exists(c)) results.Add(CleanService.DeleteDirContents(c, _logger));
-            return results.Count > 0 ? Aggregate(results.ToArray()) : default;
+                Path.Combine(x86, @"Steam\config\htmlcache"));
         }
 
         private CleanService.CleanResult CleanPrefetch()
-        {
-            var prefetch = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Prefetch");
-            return Directory.Exists(prefetch) ? CleanService.DeleteDirContents(prefetch, _logger) : default;
-        }
+            => CleanSingleDir(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Prefetch"));
 
         private CleanService.CleanResult CleanMemoryDump()
         {
@@ -696,60 +1339,42 @@ namespace DiskCleaner.ViewModels
         private CleanService.CleanResult CleanBaiduPanCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var candidates = new[]
-            {
+            return CleanCandidateDirs(
                 Path.Combine(local, @"Baidu\BaiduNetdisk\cache"),
-                Path.Combine(local, @"Baidu\BaiduNetdisk\tmp")
-            };
-            var results = new List<CleanService.CleanResult>();
-            foreach (var c in candidates)
-                if (Directory.Exists(c)) results.Add(CleanService.DeleteDirContents(c, _logger));
-            return results.Count > 0 ? Aggregate(results.ToArray()) : default;
+                Path.Combine(local, @"Baidu\BaiduNetdisk\tmp"));
         }
 
         private CleanService.CleanResult CleanThunderCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var candidates = new[]
-            {
+            return CleanCandidateDirs(
                 Path.Combine(local, @"Thunder Network\Thunder\Profiles\Cache"),
-                Path.Combine(local, @"Thunder Network\XLLiveUD\Cache")
-            };
-            var results = new List<CleanService.CleanResult>();
-            foreach (var c in candidates)
-                if (Directory.Exists(c)) results.Add(CleanService.DeleteDirContents(c, _logger));
-            return results.Count > 0 ? Aggregate(results.ToArray()) : default;
+                Path.Combine(local, @"Thunder Network\XLLiveUD\Cache"));
         }
 
         private CleanService.CleanResult CleanBilibiliCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var candidates = new[] { Path.Combine(local, @"bilibili\Cache"), Path.Combine(local, @"Bilibili\Cache") };
-            var results = new List<CleanService.CleanResult>();
-            foreach (var c in candidates) if (Directory.Exists(c)) results.Add(CleanService.DeleteDirContents(c, _logger));
-            return results.Count > 0 ? Aggregate(results.ToArray()) : default;
+            return CleanCandidateDirs(
+                Path.Combine(local, @"bilibili\Cache"),
+                Path.Combine(local, @"Bilibili\Cache"));
         }
 
         private CleanService.CleanResult CleanIqiyiCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var candidates = new[] { Path.Combine(local, @"Qiyi\QiyiClient\cache"), Path.Combine(local, @"Qiyi\QiyiClient\webcache") };
-            var results = new List<CleanService.CleanResult>();
-            foreach (var c in candidates) if (Directory.Exists(c)) results.Add(CleanService.DeleteDirContents(c, _logger));
-            return results.Count > 0 ? Aggregate(results.ToArray()) : default;
+            return CleanCandidateDirs(
+                Path.Combine(local, @"Qiyi\QiyiClient\cache"),
+                Path.Combine(local, @"Qiyi\QiyiClient\webcache"));
         }
 
         private CleanService.CleanResult CleanDiscordCache()
         {
-            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var stable = Path.Combine(local, @"Discord");
-            var results = new List<CleanService.CleanResult>();
-            foreach (var c in new[] { "Cache", "Code Cache", "GPUCache" })
-            {
-                var p = Path.Combine(stable, c);
-                if (Directory.Exists(p)) results.Add(CleanService.DeleteDirContents(p, _logger));
-            }
-            return results.Count > 0 ? Aggregate(results.ToArray()) : default;
+            var stable = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Discord");
+            return CleanCandidateDirs(
+                Path.Combine(stable, "Cache"),
+                Path.Combine(stable, "Code Cache"),
+                Path.Combine(stable, "GPUCache"));
         }
 
         private CleanService.CleanResult CleanBrowser360Cache()
@@ -762,42 +1387,35 @@ namespace DiskCleaner.ViewModels
         private CleanService.CleanResult CleanSogouCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var candidates = new[] { Path.Combine(local, @"SogouExplorer\Cache"), Path.Combine(local, @"SogouExplorer\WebkitCache") };
-            var results = new List<CleanService.CleanResult>();
-            foreach (var c in candidates) if (Directory.Exists(c)) results.Add(CleanService.DeleteDirContents(c, _logger));
-            return results.Count > 0 ? Aggregate(results.ToArray()) : default;
+            return CleanCandidateDirs(
+                Path.Combine(local, @"SogouExplorer\Cache"),
+                Path.Combine(local, @"SogouExplorer\WebkitCache"));
         }
 
         private CleanService.CleanResult CleanFeishuCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var candidates = new[] { Path.Combine(local, @"Feishu\Cache"), Path.Combine(local, @"Feishu\Application\Cache"), Path.Combine(local, @"Feishu\user_data\cache") };
-            var results = new List<CleanService.CleanResult>();
-            foreach (var c in candidates) if (Directory.Exists(c)) results.Add(CleanService.DeleteDirContents(c, _logger));
-            return results.Count > 0 ? Aggregate(results.ToArray()) : default;
+            return CleanCandidateDirs(
+                Path.Combine(local, @"Feishu\Cache"),
+                Path.Combine(local, @"Feishu\Application\Cache"),
+                Path.Combine(local, @"Feishu\user_data\cache"));
         }
 
         private CleanService.CleanResult CleanWeMeetCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var candidates = new[] { Path.Combine(local, @"Tencent\WeMeet\Cache"), Path.Combine(local, @"Tencent\WeMeet\AppCache") };
-            var results = new List<CleanService.CleanResult>();
-            foreach (var c in candidates) if (Directory.Exists(c)) results.Add(CleanService.DeleteDirContents(c, _logger));
-            return results.Count > 0 ? Aggregate(results.ToArray()) : default;
+            return CleanCandidateDirs(
+                Path.Combine(local, @"Tencent\WeMeet\Cache"),
+                Path.Combine(local, @"Tencent\WeMeet\AppCache"));
         }
 
         private CleanService.CleanResult CleanJianyingCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var candidates = new[]
-            {
+            return CleanCandidateDirs(
                 Path.Combine(local, @"JianyingPro\Cache"),
                 Path.Combine(local, @"JianyingPro\User Data\Cache"),
-                Path.Combine(local, @"JianyingPro\User Data\GPUCache")
-            };
-            var results = new List<CleanService.CleanResult>();
-            foreach (var c in candidates) if (Directory.Exists(c)) results.Add(CleanService.DeleteDirContents(c, _logger));
-            return results.Count > 0 ? Aggregate(results.ToArray()) : default;
+                Path.Combine(local, @"JianyingPro\User Data\GPUCache"));
         }
 
         private void CleanTelegramCache()
@@ -808,7 +1426,7 @@ namespace DiskCleaner.ViewModels
                 Path.Combine(appData, @"Telegram Desktop\tdata\cache"),
                 Path.Combine(appData, @"Telegram Desktop\tdata\media_cache")
             };
-            // 只删确定为缓存性质的文件扩展名；tdata 根目录含 map/key/哈希名目录是用户会话数据库，绝不触碰
+            
             var safeExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 ".cache", ".blob", ".bin", ".tmp", ".dat", ".jpg", ".jpeg", ".png", ".webp", ".gif",
@@ -823,8 +1441,8 @@ namespace DiskCleaner.ViewModels
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            // 仅清理 cache 与 Storage（真正的临时缓存）；
-            // 严禁清理 Data 目录 —— 包含已下载的离线播放音乐，删除会导致离线播放列表全部丢失！
+            
+            
             var candidates = new[]
             {
                 Path.Combine(local, @"Spotify\cache"),
@@ -837,8 +1455,8 @@ namespace DiskCleaner.ViewModels
         private void CleanAdobeCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            // 媒体缓存文件扩展名：仅删确认是媒体预渲染/波形缓存的文件，
-            // .mcdb 是索引数据库（删了 PR/AE 下次会重新扫描所有素材耗时长），保留
+            
+            
             var adobeMediaCacheExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 ".pek", ".cfa", ".ims", ".xmp"
@@ -851,7 +1469,7 @@ namespace DiskCleaner.ViewModels
             foreach (var c in candidates)
                 if (Directory.Exists(c))
                     CleanDirByExtensionWhitelist(c, adobeMediaCacheExts, _logger);
-            // Premiere Pro 媒体缓存位于版本化子目录下，需枚举
+            
             var premiereRoot = Path.Combine(local, @"Adobe\Premiere Pro");
             if (Directory.Exists(premiereRoot))
                 foreach (var ver in Directory.GetDirectories(premiereRoot))
@@ -874,17 +1492,44 @@ namespace DiskCleaner.ViewModels
                 if (Directory.Exists(c)) CleanService.DeleteDirContents(c, _logger);
         }
 
-        // ═══════════════════════════════════════════════════════════════
-        //  新增：系统级遗漏清理项
-        // ═══════════════════════════════════════════════════════════════
+        
+        
+        
 
-        /// <summary>
-        /// 清理 Windows 大版本升级遗留的临时文件（C:\$WINDOWS.~BT、$WINDOWS.~WS、$WINDOWS.~Q）。
-        /// 这些目录在 Windows 10/11 大版本升级完成后会残留数 GB 到数十 GB 的安装文件，
-        /// 升级已完成且用户确认无需回滚旧系统时即可安全删除。
-        /// </summary>
+        
+        
+        
+        
+        
+        private static bool IsSystemUpgrading()
+        {
+            
+            
+            
+            
+            
+            
+            var markers = new[] { "SetupHost", "WindowsUpdateBox", "MoUsoCoreWorker", "DismHost", "TiWorker" };
+            foreach (var name in markers)
+            {
+                try { if (Process.GetProcessesByName(name).Length > 0) return true; }
+                catch { }
+            }
+            return false;
+        }
+
+        
+        
+        
+        
+        
         private void CleanWindowsUpgradeTemp()
         {
+            if (IsSystemUpgrading())
+            {
+                _logger?.Warning("检测到系统正在执行升级/维护，已跳过 Windows 升级临时文件清理，避免破坏进行中的升级。");
+                return;
+            }
             var sysDrive = Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.Windows));
             if (string.IsNullOrEmpty(sysDrive)) return;
             var candidates = new[]
@@ -898,11 +1543,11 @@ namespace DiskCleaner.ViewModels
                     CleanService.DeleteDir(c, _logger);
         }
 
-        /// <summary>
-        /// 清理 Windows Defender 扫描历史与隔离区元数据。
-        /// 仅清理 Scans\History\Service\DetectionHistory 与 Scans\History\Service\DtlQuarantine 的元数据，
-        /// 不删除 ProgramData\Microsoft\Windows Defender 平台目录本身（Defender 服务运行所需）。
-        /// </summary>
+        
+        
+        
+        
+        
         private void CleanDefenderHistory()
         {
             var common = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
@@ -910,26 +1555,26 @@ namespace DiskCleaner.ViewModels
             if (!Directory.Exists(scansRoot)) return;
             var candidates = new[]
             {
-                Path.Combine(scansRoot, @"Service\DetectionHistory"), // 历史检测记录
-                Path.Combine(scansRoot, @"Service\DtlQuarantine"),    // 隔离文件元数据
-                Path.Combine(scansRoot, @"Store"),                    // 旧版存储
-                Path.Combine(scansRoot, @"ParserStore")               // 解析缓存
+                Path.Combine(scansRoot, @"Service\DetectionHistory"), 
+                Path.Combine(scansRoot, @"Service\DtlQuarantine"),    
+                Path.Combine(scansRoot, @"Store"),                    
+                Path.Combine(scansRoot, @"ParserStore")               
             };
             foreach (var c in candidates)
                 if (Directory.Exists(c)) CleanService.DeleteDirContents(c, _logger);
         }
 
-        /// <summary>
-        /// 清理 Windows 字体缓存服务（FontCache）的临时数据。
-        /// 位于 C:\Windows\ServiceProfiles\LocalService\AppData\Local\FontCache。
-        /// 删除后系统会自动重建（FontCache 服务会重新生成 .dat 缓存数据库）。
-        /// </summary>
+        
+        
+        
+        
+        
         private void CleanFontCache()
         {
             var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
             var fontCacheDir = Path.Combine(winDir, @"ServiceProfiles\LocalService\AppData\Local\FontCache");
             if (!Directory.Exists(fontCacheDir)) return;
-            // 仅删除 .dat 缓存文件，保留目录本身与服务运行时锁定的活动文件
+            
             foreach (var f in Directory.GetFiles(fontCacheDir, "*.dat"))
             {
                 try { CleanService.DeleteFile(f, _logger); }
@@ -937,10 +1582,10 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 清理 C:\Windows\LiveKernelReports 中的实时内核崩溃报告。
-        /// 这些 .dmp / .cab 文件由 Windows 在驱动崩溃时生成，体积可达数百 MB。
-        /// </summary>
+        
+        
+        
+        
         private void CleanLiveKernelReports()
         {
             var winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
@@ -949,12 +1594,12 @@ namespace DiskCleaner.ViewModels
             CleanService.DeleteDirContents(dir, _logger);
         }
 
-        /// <summary>
-        /// 清理 %LocalAppData%\IconCache.db 图标缓存数据库。
-        /// 注意：这是 LocalAppData 根目录下的单个文件，与 thumbnail_cache 清理的
-        /// Microsoft\Windows\Explorer\iconcache_*.db 是不同的文件，二者互补。
-        /// 删除后系统会自动重建。
-        /// </summary>
+        
+        
+        
+        
+        
+        
         private void CleanIconCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -963,28 +1608,28 @@ namespace DiskCleaner.ViewModels
                 CleanService.DeleteFile(iconCache, _logger);
         }
 
-        // ═══════════════════════════════════════════════════════════════
-        //  新增：即时通讯
-        // ═══════════════════════════════════════════════════════════════
+        
+        
+        
 
-        /// <summary>
-        /// 清理微信 PC 客户端缓存。
-        /// 仅清理 FileStorage\Cache（真正的临时缓存目录）。
-        /// 严禁清理以下目录（均为用户数据，删除会导致聊天内容丢失）：
-        ///   - FileStorage\Msg      : 文字聊天记录数据库（删除=丢聊天记录）
-        ///   - FileStorage\MsgAttach : 聊天附件（图片/视频/语音原文件）
-        ///   - FileStorage\Image     : 聊天图片原文件（删除=图片显示"已过期"）
-        ///   - FileStorage\Video     : 聊天视频原文件（删除=视频无法播放）
-        ///   - FileStorage\File      : 接收的文件
-        /// 微信不像浏览器有"纯缓存"概念，Image/Video 存的就是聊天原文件！
-        /// </summary>
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         private void CleanWeChatCache()
         {
             var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             var wechatRoot = Path.Combine(documents, "WeChat Files");
             if (!Directory.Exists(wechatRoot))
             {
-                // 兼容自定义 Documents 路径失败的情况，回退到 LocalAppData
+                
                 var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
                 wechatRoot = Path.Combine(local, @"Tencent\WeChat");
             }
@@ -992,31 +1637,33 @@ namespace DiskCleaner.ViewModels
 
             foreach (var wxidDir in Directory.GetDirectories(wechatRoot))
             {
-                // 跳过 All Users 等系统目录
+                
                 var dirName = Path.GetFileName(wxidDir);
                 if (dirName.Equals("All Users", StringComparison.OrdinalIgnoreCase)) continue;
 
                 var fileStorage = Path.Combine(wxidDir, "FileStorage");
                 if (!Directory.Exists(fileStorage)) continue;
 
-                // 仅清理 Cache（真正的临时缓存）。
-                // 绝不清理 Image/Video/MsgAttach/File/Msg —— 这些是聊天原文件与消息数据库！
+                
+                
                 var cacheOnly = Path.Combine(fileStorage, "Cache");
                 if (Directory.Exists(cacheOnly))
                     CleanService.DeleteDirContents(cacheOnly, _logger);
             }
         }
 
-        /// <summary>
-        /// 清理 QQ PC 客户端缓存。
-        /// 仅清理 RichMedia（富媒体消息的缩略图缓存），保留聊天原文件。
-        /// 严禁清理以下目录（均为用户数据）：
-        ///   - Image    : 聊天图片原文件（删除=图片无法查看）
-        ///   - Video    : 聊天视频原文件（删除=视频无法播放）
-        ///   - FileRecv : 接收的文件
-        ///   - Emoji    : 自定义表情
-        /// QQ 的 RichMedia 存的是富媒体缩略图缓存，清理相对安全。
-        /// </summary>
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         private void CleanQQCache()
         {
             var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
@@ -1025,22 +1672,34 @@ namespace DiskCleaner.ViewModels
             foreach (var qqDir in Directory.GetDirectories(tencentRoot))
             {
                 var dirName = Path.GetFileName(qqDir);
-                // 跳过 All Users 等系统目录
+                
                 if (dirName.Equals("All Users", StringComparison.OrdinalIgnoreCase)) continue;
 
-                // 仅清理 RichMedia（富媒体缩略图缓存）。
-                // 绝不清理 Image/Video/FileRecv —— 这些是聊天原文件与接收文件！
+                
+                
                 var richMedia = Path.Combine(qqDir, "RichMedia");
                 if (Directory.Exists(richMedia))
                     CleanService.DeleteDirContents(richMedia, _logger);
             }
+
+            
+            
+            
+            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            foreach (var c in new[]
+            {
+                Path.Combine(local, @"Tencent\QQ\Cache"),
+                Path.Combine(local, @"Tencent\QQ\Code Cache"),
+                Path.Combine(local, @"Tencent\QQ\GPUCache")
+            })
+                if (Directory.Exists(c)) CleanService.DeleteDirContents(c, _logger);
         }
 
-        /// <summary>
-        /// 清理企业微信客户端缓存。
-        /// 仅清理 Cache 目录（真正的临时缓存），保留 Image/Video/Msg 等聊天原文件与消息数据库。
-        /// 企业微信目录结构与微信类似：Image/Video 存的是聊天原文件，非纯缓存。
-        /// </summary>
+        
+        
+        
+        
+        
         private void CleanWXWorkCache()
         {
             var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
@@ -1048,14 +1707,14 @@ namespace DiskCleaner.ViewModels
             if (!Directory.Exists(wxworkRoot)) return;
             foreach (var uidDir in Directory.GetDirectories(wxworkRoot))
             {
-                // 仅清理 Cache（真正的临时缓存），绝不清理 Image/Video/Msg 等聊天原文件
+                
                 var cacheOnly = Path.Combine(uidDir, "Cache");
                 if (Directory.Exists(cacheOnly))
                     CleanService.DeleteDirContents(cacheOnly, _logger);
             }
         }
 
-        /// <summary>清理网易邮箱大师客户端缓存。</summary>
+        
         private void CleanMailMasterCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -1068,11 +1727,11 @@ namespace DiskCleaner.ViewModels
                 if (Directory.Exists(c)) CleanService.DeleteDirContents(c, _logger);
         }
 
-        // ═══════════════════════════════════════════════════════════════
-        //  新增：浏览器
-        // ═══════════════════════════════════════════════════════════════
+        
+        
+        
 
-        /// <summary>清理 QQ 浏览器缓存（Chromium 内核，多 Profile 支持）。</summary>
+        
         private void CleanQQBrowserCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -1080,7 +1739,7 @@ namespace DiskCleaner.ViewModels
             CleanBrowserProfileCaches(userData, new[] { "Cache", "Code Cache" });
         }
 
-        /// <summary>清理 Vivaldi 浏览器缓存（Chromium 内核，多 Profile 支持）。</summary>
+        
         private void CleanVivaldiCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -1088,11 +1747,11 @@ namespace DiskCleaner.ViewModels
             CleanBrowserProfileCaches(userData, new[] { "Cache", "Code Cache" });
         }
 
-        // ═══════════════════════════════════════════════════════════════
-        //  新增：音视频
-        // ═══════════════════════════════════════════════════════════════
+        
+        
+        
 
-        /// <summary>清理 QQ 音乐客户端缓存。</summary>
+        
         private void CleanQQMusicCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -1105,7 +1764,7 @@ namespace DiskCleaner.ViewModels
                 if (Directory.Exists(c)) CleanService.DeleteDirContents(c, _logger);
         }
 
-        /// <summary>清理酷狗音乐客户端缓存。</summary>
+        
         private void CleanKugouCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -1118,7 +1777,7 @@ namespace DiskCleaner.ViewModels
                 if (Directory.Exists(c)) CleanService.DeleteDirContents(c, _logger);
         }
 
-        /// <summary>清理酷我音乐客户端缓存。</summary>
+        
         private void CleanKuwoCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -1131,7 +1790,7 @@ namespace DiskCleaner.ViewModels
                 if (Directory.Exists(c)) CleanService.DeleteDirContents(c, _logger);
         }
 
-        /// <summary>清理腾讯视频客户端缓存。</summary>
+        
         private void CleanQQLiveCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -1144,7 +1803,7 @@ namespace DiskCleaner.ViewModels
                 if (Directory.Exists(c)) CleanService.DeleteDirContents(c, _logger);
         }
 
-        /// <summary>清理优酷客户端缓存。</summary>
+        
         private void CleanYoukuCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -1157,16 +1816,16 @@ namespace DiskCleaner.ViewModels
                 if (Directory.Exists(c)) CleanService.DeleteDirContents(c, _logger);
         }
 
-        // ═══════════════════════════════════════════════════════════════
-        //  新增：办公与游戏
-        // ═══════════════════════════════════════════════════════════════
+        
+        
+        
 
-        /// <summary>
-        /// 清理 WPS Office 缓存文件。
-        /// 仅清理 cache 目录（真正的临时缓存），保留文档与配置。
-        /// 严禁清理 backup 目录 —— 包含文档自动备份/恢复文件，类似 Office AutoRecover，
-        /// 删除可能导致用户无法恢复未保存的文档！
-        /// </summary>
+        
+        
+        
+        
+        
+        
         private void CleanWPSCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -1174,14 +1833,14 @@ namespace DiskCleaner.ViewModels
             {
                 Path.Combine(local, @"Kingsoft\office6\cache"),
                 Path.Combine(local, @"WPS\cache")
-                // 注意：不清理 Kingsoft\office6\backup —— 包含文档自动备份/恢复文件，
-                // 删除可能导致用户无法恢复未保存的文档！
+                
+                
             };
             foreach (var c in candidates)
                 if (Directory.Exists(c)) CleanService.DeleteDirContents(c, _logger);
         }
 
-        /// <summary>清理 Epic Games Launcher 缓存（保留已下载游戏库）。</summary>
+        
         private void CleanEpicCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -1195,11 +1854,11 @@ namespace DiskCleaner.ViewModels
                 if (Directory.Exists(c)) CleanService.DeleteDirContents(c, _logger);
         }
 
-        // ═══════════════════════════════════════════════════════════════
-        //  新增：开发工具缓存
-        // ═══════════════════════════════════════════════════════════════
+        
+        
+        
 
-        /// <summary>清理 Visual Studio Code 缓存、CachedData、Code Cache、GPUCache。</summary>
+        
         private void CleanVSCodeCache()
         {
             var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -1209,17 +1868,17 @@ namespace DiskCleaner.ViewModels
                 Path.Combine(appData, @"Code\CachedData"),
                 Path.Combine(appData, @"Code\Code Cache"),
                 Path.Combine(appData, @"Code\GPUCache")
-                // 注意：不清理 Code\User\workspaceStorage —— 该目录存储每个工作区的状态
-                // （打开的文件、断点、折叠节点、运行配置等），删除会丢失工作区状态影响开发体验。
+                
+                
             };
             foreach (var c in candidates)
                 if (Directory.Exists(c)) CleanService.DeleteDirContents(c, _logger);
         }
 
-        /// <summary>
-        /// 清理 JetBrains 系列 IDE（IntelliJ IDEA / PyCharm / WebStorm / Rider / CLion / Android Studio 等）的 caches、log、tmp 目录。
-        /// 保留 config、projects、plugins 等用户配置与项目数据。
-        /// </summary>
+        
+        
+        
+        
         private void CleanJetBrainsCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -1227,7 +1886,7 @@ namespace DiskCleaner.ViewModels
             if (!Directory.Exists(jbRoot)) return;
             foreach (var productDir in Directory.GetDirectories(jbRoot))
             {
-                // 每个产品目录下有 caches、log、tmp 等子目录
+                
                 var subDirs = new[] { "caches", "log", "tmp", "index" };
                 foreach (var sub in subDirs)
                 {
@@ -1235,7 +1894,7 @@ namespace DiskCleaner.ViewModels
                     if (Directory.Exists(p)) CleanService.DeleteDirContents(p, _logger);
                 }
             }
-            // 兼容旧版本：Android Studio 在独立目录
+            
             var androidStudioRoot = Path.Combine(local, @"Google\AndroidStudio");
             if (Directory.Exists(androidStudioRoot))
                 foreach (var verDir in Directory.GetDirectories(androidStudioRoot))
@@ -1249,7 +1908,7 @@ namespace DiskCleaner.ViewModels
                 }
         }
 
-        /// <summary>清理 Visual Studio 组件模型缓存与 IDE 缓存。</summary>
+        
         private void CleanVSComponentCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -1261,7 +1920,7 @@ namespace DiskCleaner.ViewModels
                 if (Directory.Exists(componentCache))
                     CleanService.DeleteDirContents(componentCache, _logger);
             }
-            // 兼容 VS 2019+ 的私有注册表与 MEFCache；遇到不可访问的子目录不要中断整个清理
+            
             try
             {
                 var mefCacheDirs = Directory.GetDirectories(vsRoot, "MEFCache", SearchOption.AllDirectories);
@@ -1271,7 +1930,7 @@ namespace DiskCleaner.ViewModels
             catch (Exception ex) { _logger?.Error($"枚举 MEFCache 目录失败: {vsRoot}", ex); }
         }
 
-        /// <summary>清理 npm 包管理器缓存（C:\Users\{user}\AppData\Local\npm-cache）。</summary>
+        
         private void CleanNpmCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -1279,20 +1938,20 @@ namespace DiskCleaner.ViewModels
             if (Directory.Exists(cache)) CleanService.DeleteDirContents(cache, _logger);
         }
 
-        /// <summary>清理 Python pip 包管理器缓存。</summary>
+        
         private void CleanPipCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            // Windows 文件系统不区分大小写，pip\cache 与 pip\Cache 是同一目录，只清一次
+            
             var cache = Path.Combine(local, @"pip\cache");
             if (Directory.Exists(cache)) CleanService.DeleteDirContents(cache, _logger);
         }
 
-        /// <summary>
-        /// 清理 Maven 本地依赖仓库（~/.m2/repository）。
-        /// 下次构建项目时会重新从远程仓库下载依赖，仅影响构建速度，不影响代码。
-        /// 标记为 Caution：清后重新下载可能耗时较长。
-        /// </summary>
+        
+        
+        
+        
+        
         private void CleanMavenCache()
         {
             var userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -1301,11 +1960,11 @@ namespace DiskCleaner.ViewModels
                 CleanService.DeleteDirContents(repo, _logger);
         }
 
-        /// <summary>
-        /// 清理 Gradle 构建缓存（~/.gradle/caches）。
-        /// 下次构建项目时会重新下载依赖，仅影响构建速度，不影响代码。
-        /// 标记为 Caution：清后重新下载可能耗时较长。
-        /// </summary>
+        
+        
+        
+        
+        
         private void CleanGradleCache()
         {
             var userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -1314,14 +1973,14 @@ namespace DiskCleaner.ViewModels
                 CleanService.DeleteDirContents(caches, _logger);
         }
 
-        /// <summary>清理 NuGet HTTP 缓存（不删除已安装包，仅删下载临时缓存）。</summary>
+        
         private void CleanNuGetCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            // v3 HTTP 缓存（.NET Core / .NET 5+）
+            
             var httpCache = Path.Combine(local, @"NuGet\v3-cache");
             if (Directory.Exists(httpCache)) CleanService.DeleteDirContents(httpCache, _logger);
-            // v2 HTTP 缓存（旧版 .NET Framework）
+            
             var v2Cache = Path.Combine(local, @"NuGet\Cache");
             if (Directory.Exists(v2Cache)) CleanService.DeleteDirContents(v2Cache, _logger);
         }
@@ -1376,9 +2035,9 @@ namespace DiskCleaner.ViewModels
             var recent = Environment.GetFolderPath(Environment.SpecialFolder.Recent);
             if (Directory.Exists(recent))
             {
-                // 仅删除「最近使用的项目」.lnk 快捷方式；
-                // AutomaticDestinations / CustomDestinations 保存的是 Quick Access 与跳转列表数据，
-                // 删除会导致「此电脑」左侧导航栏 / 快速访问被重置为系统默认，故不再清理。
+                
+                
+                
                 foreach (var f in Directory.GetFiles(recent, "*.lnk"))
                     CleanService.DeleteFile(f, _logger);
             }
@@ -1390,28 +2049,28 @@ namespace DiskCleaner.ViewModels
             CleanService.DeleteDirContents(Path.Combine(local, @"Microsoft\Windows\Clipboard"), _logger);
         }
 
-        /// <summary>
-        /// 仅清理 HKCU 下"纯历史 / 最近使用（MRU）"痕迹键的白名单。
-        // =====================================================================
-        // 注册表清理：仅清理“已失效 / 无效”的注册表项（安全）
-        // 判定标准：注册表项引用了一个【磁盘上已不存在】的文件（开机启动项、COM/ActiveX
-        // 服务器、软件卸载程序）。这类引用指向的软件早已不存在，删除孤立引用不会破坏任何
-        // 仍在使用的功能，属于业界公认的“安全垃圾”。绝不扫描 / 删除文件关联、驱动、系统关键项。
-        // =====================================================================
+        
+        
+        
+        
+        
+        
+        
+        
 
-        /// <summary>
-        /// 判断一个注册表“命令 / 路径”值是否指向磁盘上已不存在的文件（即失效引用）。
-        /// 仅当：值是绝对路径、展开环境变量并兼顾 WOW64 重定向后仍不存在时，才判定为“失效”。
-        /// 系统命令（如 msiexec.exe /X...、rundll32）、文件仍存在时一律返回 false。
-        /// </summary>
+        
+        
+        
+        
+        
         private static bool IsDeadFileReference(string command)
         {
             if (string.IsNullOrWhiteSpace(command)) return false;
             var s = command.Trim();
 
-            // 安全护栏：下列命令即使无法逐字解析到存在的 exe，也绝不视为“失效”，
-            // 避免误删 Windows 内置 / Microsoft Store(UWP) / 协议类 右键项（含 Win11 第一层正常项）。
-            // 宁可漏清（保留一个失效残留），不可误删（毁掉用户正常功能）。
+            
+            
+            
             if (LooksLikeSystemOrSafeCommand(s)) return false;
 
             string exe;
@@ -1422,21 +2081,21 @@ namespace DiskCleaner.ViewModels
             }
             else
             {
-                // 未加引号的命令：可执行文件路径本身可能包含空格
-                // （如 C:\Program Files\WinRAR\Uninstall.exe 或 C:\Program Files\WinRAR\WinRAR.exe "%1"）。
-                // 不能简单地按第一个空格截断，否则会把 "C:\Program" 误判为失效路径，
-                // 进而把“已安装软件”的卸载项/右键菜单当成失效项删除（典型的误杀，如 WinRAR）。
-                // 这里从前往后累加空格分隔的片段，找到第一个真实存在的可执行文件。
+                
+                
+                
+                
+                
                 exe = ResolveExecutableFromUnquoted(s);
             }
 
             exe = Environment.ExpandEnvironmentVariables(exe).Trim();
             if (string.IsNullOrWhiteSpace(exe) || !Path.IsPathRooted(exe)) return false;
-            // 用 WOW64 重定向安全的检查：32 位宿主进程也能正确识别 64 位 Program Files 下的真实文件，
-            // 避免把 Bandizip/火绒 等已安装软件的 Win11 一级菜单误判为失效而删除。
+            
+            
             if (NativeMethods.FileExistsResilient(exe)) return false;
 
-            // WOW64 重定向兜底：System32 与 SysWOW64 互查，避免把 32/64 位系统 DLL 误判为失效
+            
             string alt = null;
             if (exe.IndexOf("System32", StringComparison.OrdinalIgnoreCase) >= 0)
                 alt = ReplaceIgnoreCase(exe, "System32", "SysWOW64");
@@ -1452,41 +2111,41 @@ namespace DiskCleaner.ViewModels
             return idx < 0 ? s : s.Remove(idx, oldValue.Length).Insert(idx, newValue);
         }
 
-        /// <summary>
-        /// 判断一个已注册命令是否为「空可执行路径」形式的损坏命令。
-        /// 例如某个 ProgID 的 shell\open\command 默认值被写成 `"" "%1"` 或 `\`，
-        /// 这类命令无法真正启动任何程序，是「建议的应用」里出现 `\` 残留的根因，
-        /// 必须视为失效引用清理，否则会永远漏扫。
-        /// </summary>
+        
+        
+        
+        
+        
+        
         private static bool IsEmptyExecutableCommand(string command)
         {
             if (string.IsNullOrWhiteSpace(command)) return false;
             var s = command.Trim();
             if (s == "\\" || s == "\"" || s == "\"\"") return true;
-            // 形如 `"" "%1"`：开头就是一对空引号，说明可执行文件路径为空
+            
             if (s.StartsWith("\"\"", StringComparison.Ordinal)) return true;
             return false;
         }
 
-        /// <summary>
-        /// 判定命令是否“明显属于系统或安全的非文件死链”。若是，则不应被当作失效引用删除。
-        /// 用于右键/文件关联等清理的安全护栏：宁可漏清，不可误删。覆盖四类：
-        ///   ① 资源引用形式（@shell32.dll,-123 / @%SystemRoot%\...\*.dll,-1）；
-        ///   ② 指向 Windows 目录的可执行文件（rundll32 / shell32 / explorer 等系统组件实际路径）；
-        ///   ③ Microsoft Store / UWP 应用（WindowsApps 目录 ACL 受限，File.Exists 不可靠）；
-        ///   ④ 协议 / Shell 方案（ms-settings:、shell:、{GUID} 等）非文件系统死链；
-        ///   ⑤ 仅文件名形式的已知系统可执行程序（无路径）。
-        /// </summary>
+        
+        
+        
+        
+        
+        
+        
+        
+        
         private static bool LooksLikeSystemOrSafeCommand(string s)
         {
             if (string.IsNullOrWhiteSpace(s)) return false;
             var expanded = Environment.ExpandEnvironmentVariables(s).Trim();
             if (string.IsNullOrWhiteSpace(expanded)) return false;
 
-            // ① 资源引用形式
+            
             if (expanded.StartsWith("@", StringComparison.Ordinal)) return true;
 
-            // ② 指向 Windows 目录
+            
             string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
             if (!string.IsNullOrEmpty(win)
                 && (expanded.StartsWith(win, StringComparison.OrdinalIgnoreCase)
@@ -1494,35 +2153,35 @@ namespace DiskCleaner.ViewModels
                     || expanded.IndexOf(@"Windows\SysWOW64", StringComparison.OrdinalIgnoreCase) >= 0))
                 return true;
 
-            // ③ Microsoft Store / UWP 应用
+            
             if (expanded.IndexOf("WindowsApps", StringComparison.OrdinalIgnoreCase) >= 0) return true;
 
-            // ④ 协议 / Shell 方案（非文件系统路径）
+            
             if ((expanded.IndexOf(':', StringComparison.Ordinal) >= 0 || expanded.StartsWith("{", StringComparison.Ordinal))
                 && !expanded.StartsWith("\"", StringComparison.Ordinal)
                 && !Path.IsPathRooted(expanded))
                 return true;
 
-            // ⑤ 仅文件名形式的已知系统可执行程序
+            
             var first = expanded.Split(' ', '\t', '"')[0].Trim();
             if (_knownSystemExeNames.Contains(first)) return true;
 
             return false;
         }
 
-        /// <summary>
-        /// 收集文件关联中指向已卸载程序的残留项。
-        /// 扫描 HKCR\Applications 下所有已注册应用，检查 shell\open\command 是否指向存在的 exe。
-        /// </summary>
+        
+        
+        
+        
         private static List<(string exeName, string command)> GetInvalidFileAssociations()
         {
             var result = new List<(string exeName, string command)>();
 
             try
             {
-                // 扫描 Applications 注册（HKCU/HKLM，含 32 位 WOW6432Node 视图）。
-                // 注意：64 位进程直接读 Software\Classes\Applications 仅见原生(64 位)视图；
-                // 32 位程序(如 Winamp)安装在 WOW6432Node\Classes\Applications，必须显式读取，否则漏判。
+                
+                
+                
                 var appPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 void CollectApps(RegistryKey baseKey, string classesRel)
@@ -1544,7 +2203,7 @@ namespace DiskCleaner.ViewModels
                     {
                         string command = null;
 
-                        // HKCU 覆盖 HKLM；原生与 WOW6432Node 两种视图都查
+                        
                         foreach (var baseKey in new[] { Registry.LocalMachine, Registry.CurrentUser })
                         {
                             foreach (var classesRel in new[] { @"Software\Classes", @"Software\WOW6432Node\Classes" })
@@ -1554,14 +2213,14 @@ namespace DiskCleaner.ViewModels
                                 {
                                     var c = key.GetValue(null) as string;
                                     if (!string.IsNullOrWhiteSpace(c))
-                                        command = c; // 后查的 HKCU 覆盖 HKLM，符合注册表合并语义
+                                        command = c; 
                                 }
                             }
                         }
 
                         if (string.IsNullOrWhiteSpace(command)) continue;
 
-                        // 系统关键程序白名单，永不清理
+                        
                         if (IsSystemCriticalAssociation(exeName, command)) continue;
 
                         if (IsDeadFileReference(command))
@@ -1575,12 +2234,12 @@ namespace DiskCleaner.ViewModels
             return result;
         }
 
-        /// <summary>
-        /// 判断是否为系统关键的文件关联（永不清理）。
-        /// </summary>
+        
+        
+        
         private static bool IsSystemCriticalAssociation(string exeName, string command)
         {
-            // 系统内置程序白名单
+            
             var systemApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 "notepad.exe",
@@ -1665,25 +2324,25 @@ namespace DiskCleaner.ViewModels
 
             if (systemApps.Contains(exeName)) return true;
 
-            // 注意：旧版曾有 command.Contains("Program Files") / "System32" / "Microsoft" 等路径兜底白名单，
-            // 但这会导致所有安装在 Program Files 下的第三方软件（即使 exe 已被卸载删除）也永远不被判定为失效，
-            // 与 IsDeadFileReference 的 File.Exists 判定矛盾，使「无效文件关联」清理对大部分软件完全失效。
-            // 显式 systemApps 集合已覆盖真正不应清理的系统关键程序，无需额外路径兜底。
+            
+            
+            
+            
 
             return false;
         }
 
-        /// <summary>
-        /// 估算无效文件关联的"大小"（以条目数为单位，每个关联约 1KB 注册表空间）。
-        /// 覆盖五类来源，与 CleanInvalidFileAssociation 实际清理的范围完全一致：
-        ///   ① Applications\*.exe\shell\open\command 中指向已删 exe 的死链（GetInvalidFileAssociations）
-        ///   ② HKCU\...\FileExts 下 OpenWithProgids / OpenWithList 中的孤儿残留（CountOpenWithResiduals）
-        ///   ③ HKCR\.ext 默认值 / OpenWithProgids / OpenWithList 中失效的 ProgID（CountInvalidExtensionAssociations）
-        ///   ④ HKLM/HKCU\SOFTWARE\RegisteredApplications 中失效的能力键（CountInvalidRegisteredApplications）
-        ///   ⑤ HKLM/HKCU\...\App Paths 中指向已删 exe 的失效条目（CountInvalidAppPaths）
-        /// 旧实现只统计 ①②，导致「建议的应用 / 默认应用」里的残留（来自 ③④⑤）在扫描阶段永远为 0、
-        /// 被 ApplyVisibilityFilter 隐藏，用户误以为"没有注册表问题"——但它们真实存在。
-        /// </summary>
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         private static long InvalidFileAssociationSize()
         {
             int count = GetInvalidFileAssociations().Count;
@@ -1691,15 +2350,15 @@ namespace DiskCleaner.ViewModels
             count += CountInvalidExtensionAssociations();
             count += CountInvalidRegisteredApplications();
             count += CountInvalidAppPaths();
-            // 每个无效关联约占用 500 字节注册表空间（估算值）
+            
             return count * 500L;
         }
 
-        /// <summary>
-        /// 统计 HKCU 与 HKLM 下 Explorer\FileExts 中 OpenWithProgids / OpenWithList 的孤儿残留条目数。
-        /// 旧实现只扫 HKCU，漏掉了机器级（HKLM）的残留（如 TencentDocs.doc / TencentDocs.md 等）。
-        /// 判定与 CleanOpenWithResiduals 的删除逻辑完全一致（同样的 IsDeadProgId / IsDeadOpenWithExe）。
-        /// </summary>
+        
+        
+        
+        
+        
         private static int CountOpenWithResiduals()
         {
             int count = 0;
@@ -1718,7 +2377,7 @@ namespace DiskCleaner.ViewModels
                             using var extKey = fileExtsKey.OpenSubKey(extName, false);
                             if (extKey == null) continue;
 
-                            // ① OpenWithProgids：值为 ProgID（如 "Winamp.File"）
+                            
                             using (var progidsKey = extKey.OpenSubKey("OpenWithProgids", false))
                             {
                                 if (progidsKey != null)
@@ -1727,8 +2386,8 @@ namespace DiskCleaner.ViewModels
                                     {
                                         try
                                         {
-                                            // OpenWithProgids 的值名即 ProgID（如 "Winamp.AssocFile.MP3"），数据通常为空；
-                                            // 必须以值名为 ProgID 判定，用数据会漏掉绝大多数孤儿关联（之前几乎全部漏判）。
+                                            
+                                            
                                             if (IsDeadProgId(valueName))
                                                 count++;
                                         }
@@ -1737,7 +2396,7 @@ namespace DiskCleaner.ViewModels
                                 }
                             }
 
-                            // ② OpenWithList：值为 exe 名（如 "winamp.exe"），跳过 MRUList
+                            
                             using (var listKey = extKey.OpenSubKey("OpenWithList", false))
                             {
                                 if (listKey != null)
@@ -1764,16 +2423,16 @@ namespace DiskCleaner.ViewModels
             return count;
         }
 
-        /// <summary>
-        /// 清理无效文件关联（打开方式残留）。
-        /// </summary>
+        
+        
+        
         private void CleanInvalidFileAssociation()
         {
             var invalid = GetInvalidFileAssociations();
             int cleaned = 0;
 
-            // 清理 Applications 下的无效关联（原生 + WOW6432Node 两种视图都要删，
-            // 但必须在每个具体视图里重新判定命令是否失效，避免某视图存活时被一并误删）。
+            
+            
             foreach (var (exeName, _) in invalid)
             {
                 try
@@ -1808,20 +2467,20 @@ namespace DiskCleaner.ViewModels
                 catch { }
             }
 
-            // 清理 HKCU\...\FileExts 中的 OpenWithProgids / OpenWithList 残留
-            // 注意：即使 invalid.Count == 0，也要执行清理（FileExts 残留独立存在）
+            
+            
             CleanOpenWithResiduals();
 
-            // 清理 HKCR\.ext 默认值 / OpenWithProgids / OpenWithList 中的失效 ProgID，
-            // HKLM/HKCU\SOFTWARE\RegisteredApplications 中的失效能力键，
-            // 以及 HKLM/HKCU\...\App Paths 中指向已删 exe 的失效条目。
-            // 这几处正是 Windows「建议的应用 / 默认应用」对话框的主要数据源，
-            // 旧实现完全未覆盖，导致 .flac/.mkv 等后缀的失效关联始终扫不到、清不掉。
+            
+            
+            
+            
+            
             CleanInvalidExtensionAssociations();
             CleanInvalidRegisteredApplications();
             CleanInvalidAppPaths();
 
-            // 通知 Windows 刷新文件关联缓存
+            
             try
             {
                 NativeMethods.SHChangeNotify(
@@ -1835,13 +2494,13 @@ namespace DiskCleaner.ViewModels
             _logger.Info($"文件关联清理完成：Applications 清理 {cleaned} 个，扩展名/注册应用/App Paths/FileExts 清理见日志");
         }
 
-        /// <summary>
-        /// 清理 HKCU 与 HKLM 下 Explorer\FileExts 的 OpenWithProgids / OpenWithList 残留项。
-        /// 旧实现只清 HKCU，漏掉机器级（HKLM）残留。
-        ///
-        /// OpenWithProgids：值为 ProgID（如 "Winamp.File"），需解析为 shell\open\command 再判定 exe 是否存在。
-        /// OpenWithList：值为 exe 文件名（如 "winamp.exe"），需通过 Applications 注册表查找完整路径再判定。
-        /// </summary>
+        
+        
+        
+        
+        
+        
+        
         private void CleanOpenWithResiduals()
         {
             foreach (var baseKey in new[] { Registry.CurrentUser, Registry.LocalMachine })
@@ -1862,7 +2521,7 @@ namespace DiskCleaner.ViewModels
                             using var extKey = fileExtsKey.OpenSubKey(extName, true);
                             if (extKey == null) continue;
 
-                            // ── ① OpenWithProgids：值是 ProgID ──
+                            
                             using (var progidsKey = extKey.OpenSubKey("OpenWithProgids", true))
                             {
                                 if (progidsKey != null)
@@ -1872,7 +2531,7 @@ namespace DiskCleaner.ViewModels
                                     {
                                         try
                                         {
-                                            // 值名即 ProgID；数据通常为空，必须用值名判定
+                                            
                                             if (IsDeadProgId(valueName))
                                                 deadValues.Add(valueName);
                                         }
@@ -1885,7 +2544,7 @@ namespace DiskCleaner.ViewModels
                                         progidsCleaned++;
                                     }
 
-                                    // 默认值若指向死 ProgID 也清空
+                                    
                                     try
                                     {
                                         var defVal = progidsKey.GetValue(null) as string;
@@ -1896,7 +2555,7 @@ namespace DiskCleaner.ViewModels
                                 }
                             }
 
-                            // ── ② OpenWithList：值是 exe 文件名 ──
+                            
                             using (var listKey = extKey.OpenSubKey("OpenWithList", true))
                             {
                                 if (listKey != null)
@@ -1904,7 +2563,7 @@ namespace DiskCleaner.ViewModels
                                     var deadValues = new List<string>();
                                     foreach (var valueName in listKey.GetValueNames())
                                     {
-                                        // 跳过 MRUList 等非 exe 条目
+                                        
                                         if (valueName.Equals("MRUList", StringComparison.OrdinalIgnoreCase)) continue;
                                         try
                                         {
@@ -1935,18 +2594,18 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 判断一个 ProgID 是否指向不存在的程序（用于 OpenWithProgids 清理）。
-        /// 通过 HKCR\<ProgID>\shell\open\command 取出命令行，再用 IsDeadFileReference 判定。
-        /// </summary>
+        
+        
+        
+        
         private static bool IsDeadProgId(string progId)
         {
             if (string.IsNullOrWhiteSpace(progId)) return false;
 
-            // 依次查 HKCU、HKLM、HKCR 的 Classes 根（含 32 位 WOW6432Node 视图）。
-            // 不再遇到第一个“存在但无命令”的键就短路判存活——否则会漏掉 HKCR/另一视图里
-            // 真实存在的死命令（例如某 ProgID 在 HKCU 只有空壳、在 HKCR 的 open command
-            // 却指向已删除 exe 的情况）。现在只有确认任一视图存在【仍存活】的命令才判存活。
+            
+            
+            
+            
             var bases = new[] { Registry.CurrentUser, Registry.LocalMachine, Registry.ClassesRoot };
             var classPaths = new[] { @"Software\Classes", @"Software\WOW6432Node\Classes", "" };
 
@@ -1971,8 +2630,8 @@ namespace DiskCleaner.ViewModels
                             var command = cmdKey.GetValue(null) as string;
                             if (!string.IsNullOrWhiteSpace(command))
                             {
-                                // 指向已删除 exe，或空可执行路径（如 `"" "%1"` / `\`）都视为失效，
-                                // 但必须等所有视图都查完再下结论：任一视图存在存活命令就应判存活。
+                                
+                                
                                 if (IsDeadFileReference(command) || IsEmptyExecutableCommand(command))
                                     foundDeadCommand = true;
                                 else
@@ -1984,26 +2643,26 @@ namespace DiskCleaner.ViewModels
                 }
             }
 
-            // 只有确认没有任何存活命令、且确实发现失效命令时才判失效；
-            // 避免 HKCU 有存活命令、HKLM 另一视图有死命令时被误删。
+            
+            
             if (anyAliveCommand) return false;
             if (foundDeadCommand) return true;
 
-            // 键存在但没有可判定的命令（如 AppX 的 DelegateExecute）-> 保守视为存活，避免误删现代应用关联。
-            // 键在所有视图都不存在 -> 孤儿引用，应清理。
+            
+            
             return !existsAnywhere;
         }
 
-        /// <summary>
-        /// 判断 OpenWithList 中的 exe 名是否对应已不存在的程序（用于清理「建议的应用/打开方式」残留）。
-        /// 判定规则（与 Windows「打开方式」能否真正启动该程序一致）：
-        ///   1) 在 Applications 与 App Paths 下查找该 exe 的注册命令；只要任一注册指向的 exe 仍存在 -> 视为存活（保留）。
-        ///   2) 若找到命令但指向的 exe 已不存在 -> 失效（清理）。
-        ///   3) 若完全没有任何 Applications / App Paths 注册 -> 该 exe 不再是已注册的处理程序，
-        ///      OpenWithList 中的 MRU 条目属于孤儿残留（无法再启动该程序），判定为失效清理。
-        /// 注：绿色/便携版程序（如装在 D:\绿色 下）往往不写 Applications 注册，
-        /// 旧实现因查不到注册而误判存活，导致「建议的应用」里残留无法清理——此处按规则 3 清理。
-        /// </summary>
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
         private static bool IsDeadOpenWithExe(string exeName)
         {
             if (string.IsNullOrWhiteSpace(exeName)) return false;
@@ -2015,7 +2674,7 @@ namespace DiskCleaner.ViewModels
             {
                 foreach (var cr in classRels)
                 {
-                    // ① Applications\<exe>\shell\open\command
+                    
                     try
                     {
                         using var appKey = baseKey.OpenSubKey($@"{cr}\Applications\{exeName}\shell\open\command", false);
@@ -2025,7 +2684,7 @@ namespace DiskCleaner.ViewModels
                             if (!string.IsNullOrWhiteSpace(command))
                             {
                                 if (!IsDeadFileReference(command))
-                                    return false; // 任一注册指向的 exe 仍存在 -> 存活
+                                    return false; 
                             }
                         }
                     }
@@ -2033,7 +2692,7 @@ namespace DiskCleaner.ViewModels
                 }
             }
 
-            // ② App Paths\<exe>（原生 + WOW6432Node 视图；默认值为 exe 完整路径，可能带 ",FriendlyName" 后缀）
+            
             foreach (var baseKey in bases)
             {
                 foreach (var appPathsRel in new[]
@@ -2052,7 +2711,7 @@ namespace DiskCleaner.ViewModels
                             {
                                 var pathOnly = p.Split(',')[0].Trim();
                                 if (!IsDeadFileReference(pathOnly))
-                                    return false; // 存活
+                                    return false; 
                             }
                         }
                     }
@@ -2060,24 +2719,24 @@ namespace DiskCleaner.ViewModels
                 }
             }
 
-            // 规则 3：无任何注册 -> 孤儿残留，清理
+            
             return true;
         }
 
-        /// <summary>
-        /// 扩展名键扫描与清理：Windows「建议的应用 / 默认应用」对话框的另一主要数据源。
-        /// 旧实现只扫 HKCR\Applications，完全漏掉：
-        ///   ① HKCR\.ext 默认值（如 .flac 默认指向 Winamp.File.FLAC）；
-        ///   ② HKCR\.ext\OpenWithProgids 中已失效的 ProgID（如 io.mpv.flac / io.umpv.flac）。
-        /// 这些正是「打开方式」里残留程序的来源，必须纳入扫描与清理，否则永远扫不到。
-        /// </summary>
+        
+        
+        
+        
+        
+        
+        
         private static readonly string[] _classesRels = new[]
         {
             @"Software\Classes",
             @"Software\WOW6432Node\Classes"
         };
 
-        /// <summary>统计扩展名键默认值 / OpenWithProgids / OpenWithList 中失效引用的条数。</summary>
+        
         private static int CountInvalidExtensionAssociations()
         {
             int count = 0;
@@ -2107,7 +2766,7 @@ namespace DiskCleaner.ViewModels
                                             count++;
                             }
 
-                            // 类级 OpenWithList：值数据为 exe 文件名（如 winamp.exe）
+                            
                             using (var listKey = extKey.OpenSubKey("OpenWithList", false))
                             {
                                 if (listKey != null)
@@ -2127,7 +2786,7 @@ namespace DiskCleaner.ViewModels
             return count;
         }
 
-        /// <summary>清理扩展名键默认值 / OpenWithProgids / OpenWithList 中失效的引用。</summary>
+        
         private void CleanInvalidExtensionAssociations()
         {
             int cleaned = 0;
@@ -2187,11 +2846,11 @@ namespace DiskCleaner.ViewModels
                 _logger?.Info($"已清理扩展名关联残留: {cleaned} 条");
         }
 
-        /// <summary>
-        /// 注册应用能力键扫描与清理：HKLM/HKCU\SOFTWARE\RegisteredApplications 中
-        /// 指向已卸载（exe 不存在）程序的条目。这些条目是 Windows「建议的应用」列表的
-        /// 主要来源（如 AIMP、foobar2000、mpv 等），旧实现完全未覆盖。
-        /// </summary>
+        
+        
+        
+        
+        
         private static int CountInvalidRegisteredApplications()
         {
             int count = 0;
@@ -2209,7 +2868,7 @@ namespace DiskCleaner.ViewModels
             return count;
         }
 
-        /// <summary>清理 HKLM/HKCU\SOFTWARE\RegisteredApplications 中的失效条目。</summary>
+        
         private void CleanInvalidRegisteredApplications()
         {
             int cleaned = 0;
@@ -2238,11 +2897,11 @@ namespace DiskCleaner.ViewModels
                 _logger?.Info($"已清理失效注册应用: {cleaned} 个");
         }
 
-        /// <summary>
-        /// 统计 HKLM/HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths 中
-        /// 指向已删除 exe 的失效条目。这类条目正是「建议的应用」里直接显示完整路径
-        /// （如 D:\绿色\foobar2000\foobar2000.exe）的来源，旧实现完全未覆盖。
-        /// </summary>
+        
+        
+        
+        
+        
         private static int CountInvalidAppPaths()
         {
             int count = 0;
@@ -2267,7 +2926,7 @@ namespace DiskCleaner.ViewModels
             return count;
         }
 
-        /// <summary>清理 App Paths 中指向已删除 exe 的失效条目。</summary>
+        
         private void CleanInvalidAppPaths()
         {
             int cleaned = 0;
@@ -2298,11 +2957,11 @@ namespace DiskCleaner.ViewModels
                 _logger?.Info($"已清理失效 App Paths: {cleaned} 个");
         }
 
-        /// <summary>
-        /// 统计 SharedDLLs 中指向已删除 DLL 的失效引用计数。
-        /// 位置：HKLM/HKCU 的 SOFTWARE\Microsoft\Windows\CurrentVersion\SharedDLLs
-        /// （含 WOW6432Node 32 位视图）。值名即 DLL 完整路径。
-        /// </summary>
+        
+        
+        
+        
+        
         private static int CountInvalidSharedDlls()
         {
             int count = 0;
@@ -2359,7 +3018,15 @@ namespace DiskCleaner.ViewModels
                 _logger?.Info($"已清理失效 SharedDLLs: {cleaned} 条");
         }
 
-        /// <summary>从 MuiCache 值名中提取文件路径（去掉 .FriendlyAppName / .ApplicationCompany 后缀）。</summary>
+        
+        // MuiCache 值名 = exe/dll 完整路径，可能带 .FriendlyAppName / .ApplicationCompany 后缀。
+        // 32 位(WOW64)程序的 MuiCache 重定向到 Wow6432Node 下的同名键，需两处都扫，否则大量废弃项漏掉。
+        private static readonly string[] MuiCacheKeyPaths = new[]
+        {
+            @"Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache",
+            @"Software\Classes\Wow6432Node\Local Settings\Software\Microsoft\Windows\Shell\MuiCache",
+        };
+
         private static string ExtractMuiCachePath(string valueName)
         {
             if (string.IsNullOrWhiteSpace(valueName)) return null;
@@ -2367,21 +3034,27 @@ namespace DiskCleaner.ViewModels
             if (idx > 0) return valueName.Substring(0, idx);
             idx = valueName.IndexOf(".ApplicationCompany", StringComparison.OrdinalIgnoreCase);
             if (idx > 0) return valueName.Substring(0, idx);
+            // 无后缀：值名本身就是 exe/dll 的完整路径（旧版 Windows / 无法解析 FriendlyAppName 时的原始格式）。
+            // 仅当形如文件路径（含盘符或路径分隔符）才返回，避免误删极少数非路径内部条目。
+            if (valueName.IndexOf('\\') >= 0 || (valueName.Length >= 2 && valueName[1] == ':'))
+                return valueName;
             return null;
         }
 
-        /// <summary>统计 MuiCache 中指向已删除 exe 的程序名/厂商名缓存条数。</summary>
+        
         private static int CountInvalidMuiCache()
         {
             int count = 0;
-            using var key = Registry.CurrentUser.OpenSubKey(
-                @"Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache", false);
-            if (key == null) return 0;
-            foreach (var name in key.GetValueNames())
+            foreach (var rel in MuiCacheKeyPaths)
             {
-                var path = ExtractMuiCachePath(name);
-                if (string.IsNullOrWhiteSpace(path)) continue;
-                try { if (!File.Exists(path)) count++; } catch { }
+                using var key = Registry.CurrentUser.OpenSubKey(rel, false);
+                if (key == null) continue;
+                foreach (var name in key.GetValueNames())
+                {
+                    var path = ExtractMuiCachePath(name);
+                    if (string.IsNullOrWhiteSpace(path)) continue;
+                    try { if (!File.Exists(path)) count++; } catch { }
+                }
             }
             return count;
         }
@@ -2391,33 +3064,35 @@ namespace DiskCleaner.ViewModels
         private void CleanInvalidMuiCache()
         {
             int cleaned = 0;
-            using var key = Registry.CurrentUser.OpenSubKey(
-                @"Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\MuiCache", true);
-            if (key == null) return;
-            foreach (var name in key.GetValueNames().ToList())
+            foreach (var rel in MuiCacheKeyPaths)
             {
-                var path = ExtractMuiCachePath(name);
-                if (string.IsNullOrWhiteSpace(path)) continue;
-                try
+                using var key = Registry.CurrentUser.OpenSubKey(rel, true);
+                if (key == null) continue;
+                foreach (var name in key.GetValueNames().ToList())
                 {
-                    if (!File.Exists(path))
+                    var path = ExtractMuiCachePath(name);
+                    if (string.IsNullOrWhiteSpace(path)) continue;
+                    try
                     {
-                        key.DeleteValue(name, false);
-                        cleaned++;
+                        if (!File.Exists(path))
+                        {
+                            key.DeleteValue(name, false);
+                            cleaned++;
+                        }
                     }
+                    catch { }
                 }
-                catch { }
             }
 
             if (cleaned > 0)
                 _logger?.Info($"已清理失效 MUI 缓存: {cleaned} 条");
         }
 
-        /// <summary>
-        /// 统计 AppCompatFlags\Layers 中为已删除 exe 保留的兼容性设置条数。
-        /// 位置：HKLM/HKCU 的 SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers
-        /// （含 WOW6432Node 32 位视图）。值名即 exe 完整路径。
-        /// </summary>
+        
+        
+        
+        
+        
         private static int CountInvalidAppCompatLayers()
         {
             int count = 0;
@@ -2474,31 +3149,274 @@ namespace DiskCleaner.ViewModels
                 _logger?.Info($"已清理失效兼容性设置: {cleaned} 条");
         }
 
-        /// <summary>
-        /// 判断 RegisteredApplications 指向的能力键是否已失效。
-        /// 判定优先级：
-        ///   ① ApplicationIcon 指向的 exe 不存在 -> 失效（绿色/便携程序卸载后最常见）；
-        ///   ② 无 ApplicationIcon 时，检查 FileAssociations/URLAssociations 的 ProgID，
-        ///      任一仍存活 -> 应用存活；全部失效 -> 应用失效；没有任何关联 -> 保守存活。
-        /// </summary>
+        
+        
+        
+        
+        
+        
+        private static int CountInvalidCompatStore()
+        {
+            int count = 0;
+            foreach (var baseKey in new[] { Registry.LocalMachine, Registry.CurrentUser })
+            {
+                foreach (var rel in new[]
+                {
+                    @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store",
+                    @"SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store"
+                })
+                {
+                    using var key = baseKey.OpenSubKey(rel, false);
+                    if (key == null) continue;
+                    foreach (var name in key.GetValueNames())
+                    {
+                        try { if (IsDeadFileReference(name)) count++; } catch { }
+                    }
+                }
+            }
+            return count;
+        }
+
+        private static long InvalidCompatStoreSize() => CountInvalidCompatStore() * 100L;
+
+        private void CleanInvalidCompatStore()
+        {
+            int cleaned = 0;
+            foreach (var baseKey in new[] { Registry.LocalMachine, Registry.CurrentUser })
+            {
+                foreach (var rel in new[]
+                {
+                    @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store",
+                    @"SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store"
+                })
+                {
+                    using var key = baseKey.OpenSubKey(rel, true);
+                    if (key == null) continue;
+                    foreach (var name in key.GetValueNames().ToList())
+                    {
+                        try
+                        {
+                            if (IsDeadFileReference(name))
+                            {
+                                key.DeleteValue(name, false);
+                                cleaned++;
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+
+            if (cleaned > 0)
+                _logger?.Info($"已清理失效兼容性助手记录: {cleaned} 条");
+        }
+
+        #region 失效防火墙规则
+
+        private static readonly string[] FirewallRuleKeys =
+        {
+            @"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules"
+        };
+
+        
+        
+        
+        
+        private static string ExtractFirewallApp(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return null;
+            foreach (var seg in value.Split('|'))
+            {
+                if (seg.StartsWith("App=", StringComparison.OrdinalIgnoreCase))
+                    return seg.Substring(4).Trim();
+            }
+            return null; 
+        }
+
+        private static int CountInvalidFirewallRules()
+        {
+            int count = 0;
+            foreach (var rel in FirewallRuleKeys)
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(rel, false);
+                if (key == null) continue;
+                foreach (var name in key.GetValueNames())
+                {
+                    try
+                    {
+                        var app = ExtractFirewallApp(key.GetValue(name) as string);
+                        if (app != null && IsDeadFileReference(app)) count++;
+                    }
+                    catch { }
+                }
+            }
+            return count;
+        }
+
+        private static long InvalidFirewallRulesSize() => CountInvalidFirewallRules() * 100L;
+
+        private void CleanInvalidFirewallRules()
+        {
+            int cleaned = 0;
+            
+            foreach (var rel in FirewallRuleKeys)
+            {
+                using var key = Registry.LocalMachine.OpenSubKey(rel, true);
+                if (key == null) continue;
+                foreach (var name in key.GetValueNames().ToList())
+                {
+                    try
+                    {
+                        var app = ExtractFirewallApp(key.GetValue(name) as string);
+                        if (app != null && IsDeadFileReference(app))
+                        {
+                            key.DeleteValue(name, false);
+                            cleaned++;
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            if (cleaned > 0)
+                _logger?.Info($"已清理失效防火墙规则: {cleaned} 条");
+        }
+
+        #endregion
+
+        #region 资源管理器使用痕迹
+
+        
+        
+        
+        
+        private static readonly string[] ExplorerTraceKeys =
+        {
+            @"RecentDocs",
+            @"RunMRU",
+            @"TypedPaths",
+            @"UserAssist",
+            @"ComDlg32\OpenSaveMRU",
+            @"ComDlg32\LastVisitedMRU",
+            @"ComDlg32\CIDSizeMRU"
+        };
+
+        private static long SumValueDataBytes(RegistryKey key)
+        {
+            if (key == null) return 0;
+            long total = 0;
+            try
+            {
+                foreach (var name in key.GetValueNames())
+                {
+                    var data = key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+                    if (data is string s) total += s.Length * 2L;
+                    else if (data is byte[] b) total += b.Length;
+                    else if (data is int) total += 4;
+                    else if (data is long) total += 8;
+                }
+            }
+            catch { }
+            foreach (var sub in key.GetSubKeyNames())
+            {
+                using var subKey = key.OpenSubKey(sub, false);
+                total += SumValueDataBytes(subKey);
+            }
+            return total;
+        }
+
+        private static int CountRegistryValues(RegistryKey key)
+        {
+            if (key == null) return 0;
+            int n = 0;
+            try { n += key.GetValueNames().Length; } catch { }
+            foreach (var sub in key.GetSubKeyNames())
+            {
+                using var subKey = key.OpenSubKey(sub, false);
+                n += CountRegistryValues(subKey);
+            }
+            return n;
+        }
+
+        private static int CountExplorerTraces()
+        {
+            int count = 0;
+            foreach (var rel in ExplorerTraceKeys)
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\" + rel, false);
+                count += CountRegistryValues(key);
+            }
+            return count;
+        }
+
+        private static long ExplorerTracesSize()
+        {
+            long total = 0;
+            foreach (var rel in ExplorerTraceKeys)
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\" + rel, false);
+                total += SumValueDataBytes(key);
+            }
+            return total;
+        }
+
+        private void CleanExplorerTraces()
+        {
+            int cleaned = 0;
+            foreach (var rel in ExplorerTraceKeys)
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\" + rel, true);
+                if (key == null) continue;
+                cleaned += ClearRegistryValues(key);
+            }
+            if (cleaned > 0)
+                _logger?.Info($"已清理资源管理器使用痕迹: {cleaned} 项");
+        }
+
+        
+        private static int ClearRegistryValues(RegistryKey key)
+        {
+            if (key == null) return 0;
+            int n = 0;
+            foreach (var name in key.GetValueNames().ToList())
+            {
+                try { key.DeleteValue(name, false); n++; } catch { }
+            }
+            foreach (var sub in key.GetSubKeyNames())
+            {
+                using var subKey = key.OpenSubKey(sub, true);
+                n += ClearRegistryValues(subKey);
+            }
+            return n;
+        }
+
+        #endregion
+
+        
+        
+        
+        
+        
+        
+        
         private static bool IsDeadCapabilityApp(RegistryKey baseKey, string capRel)
         {
             using var cap = baseKey.OpenSubKey(capRel, false);
-            // 能力键缺失时无法进一步确认 exe 是否仍在（如 MusicBee 只注册了 ProgID 而没有
-            // 完整的 Capabilities 键），保守视为存活，避免误删仍可正常使用的默认应用。
+            
+            
             if (cap == null) return false;
 
             var icon = cap.GetValue("ApplicationIcon") as string;
             if (!string.IsNullOrWhiteSpace(icon))
             {
                 var exe = icon.Split(',')[0].Trim();
-                // @ 开头为间接字符串（如 @shell32.dll,-123），属于系统资源，保守视为存活
+                
                 if (exe.StartsWith("@", StringComparison.Ordinal)) return false;
                 exe = Environment.ExpandEnvironmentVariables(exe);
-                // 非根路径无法可靠判定文件是否存在，保守视为存活，避免误删默认应用
+                
                 if (!Path.IsPathRooted(exe)) return false;
-                if (!IsDeadFileReference(exe)) return false; // 图标对应 exe 仍存在 -> 应用已安装
-                return true; // exe 已删除 -> 失效
+                if (!IsDeadFileReference(exe)) return false; 
+                return true; 
             }
 
             bool anyAssociation = false;
@@ -2511,18 +3429,18 @@ namespace DiskCleaner.ViewModels
                     var progId = assoc.GetValue(vn) as string;
                     if (string.IsNullOrWhiteSpace(progId)) continue;
                     anyAssociation = true;
-                    if (!IsDeadProgId(progId)) return false; // 有存活关联 -> 应用存活
+                    if (!IsDeadProgId(progId)) return false; 
                 }
             }
 
-            return anyAssociation; // 有关联但全部失效 -> 失效；无关联 -> 保守存活
+            return anyAssociation; 
         }
 
-        /// <summary>
-        /// 从“未加引号”的命令行中解析出真正的可执行文件路径。
-        /// 路径可能含空格，因此从前向后累加空格分隔的片段，
-        /// 第一个在文件系统上真实存在的文件即为可执行文件。
-        /// </summary>
+        
+        
+        
+        
+        
         private static string ResolveExecutableFromUnquoted(string s)
         {
             var parts = s.Split(' ');
@@ -2536,10 +3454,10 @@ namespace DiskCleaner.ViewModels
                 if (NativeMethods.FileExistsResilient(expanded)) return expanded;
                 if (NativeMethods.FileExistsResilient(expanded + ".exe")) return expanded + ".exe";
             }
-            // 未匹配到真实存在的可执行文件：返回原始字符串（含参数），
-            // 交由上层 IsDeadFileReference 判定（路径不存在→失效；非根路径的系统命令→保留）。
-            // 注意：绝不能退回“第一个空格之前”的截断逻辑——那会把
-            // "C:\Program Files\X\Y.exe" 误断为 "C:\Program" 而误判为失效（即此前修复的 bug）。
+            
+            
+            
+            
             return s;
         }
 
@@ -2551,20 +3469,20 @@ namespace DiskCleaner.ViewModels
             @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce"
         };
 
-        /// <summary>
-        /// “启动”文件夹（用户级 + 公共级）。其中的 .lnk 快捷方式若指向已删除的程序，即为无效启动项。
-        /// </summary>
+        
+        
+        
         private static readonly string[] _startupFolders = new[]
         {
             Environment.GetFolderPath(Environment.SpecialFolder.Startup),
             Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup)
         };
 
-        /// <summary>任务计划程序删除前的 XML 备份目录。</summary>
+        
         private static readonly string _taskBackupDir =
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DiskCleaner", "TaskBackups");
 
-        /// <summary>仅文件名形式的已知系统可执行程序：无路径时一律视为安全，不参与失效判定。</summary>
+        
         private static readonly HashSet<string> _knownSystemExeNames = new(StringComparer.OrdinalIgnoreCase)
         {
             "rundll32.exe", "rundll.exe", "regsvr32.exe", "cmd.exe", "powershell.exe", "pwsh.exe",
@@ -2584,21 +3502,21 @@ namespace DiskCleaner.ViewModels
             @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
         };
 
-        /// <summary>
-        /// 枚举所有需要扫描"无效右键菜单"的类键相对路径（相对 Classes 根）。
-        /// 覆盖三层，确保不遗漏任何程序为特定文件类型注册的右键菜单：
-        /// ① 通用类键（ContextMenuMapping.InvalidContextMenuGenericClasses）；
-        /// ② 所有扩展名键（.docx、.txt 等）；
-        /// ③ 扩展名键下的 ProgID 子键（嵌套向下一层）。
-        /// 结构性常量全部从 ContextMenuMapping 共享，避免重复定义。
-        /// </summary>
+        
+        
+        
+        
+        
+        
+        
+        
         private static IEnumerable<string> EnumerateContextMenuClassKeys(RegistryKey classesKey)
         {
-            // ① 通用类键（ContextMenuMapping 统一配置）
+            
             foreach (var cls in ContextMenuMapping.InvalidContextMenuGenericClasses)
                 yield return cls;
 
-            // ②③ 扩展名键及其 ProgID 子键
+            
             string[] extNames;
             try { extNames = classesKey.GetSubKeyNames(); }
             catch { yield break; }
@@ -2608,8 +3526,8 @@ namespace DiskCleaner.ViewModels
                 if (!name.StartsWith(".", StringComparison.OrdinalIgnoreCase)) continue;
                 yield return name;
 
-                // 嵌套向下：扩展名键的 ProgID 子键
-                // 注意：yield 不能在带 catch 的 try 块内使用，故先收集到列表再 yield
+                
+                
                 var progIdPaths = new List<string>();
                 try
                 {
@@ -2629,7 +3547,7 @@ namespace DiskCleaner.ViewModels
                     yield return p;
             }
 
-            // ④ 顶层 ProgID 键（如 WinRAR、foobar2000.MKV 等未直接挂在扩展名下的 ProgID）
+            
             var topLevelProgIds = new List<string>();
             try
             {
@@ -2637,7 +3555,7 @@ namespace DiskCleaner.ViewModels
                 {
                     if (name.StartsWith(".", StringComparison.OrdinalIgnoreCase)) continue;
                     if (ContextMenuMapping.InvalidContextMenuGenericClasses.Contains(name)) continue;
-                    if (name.StartsWith("{", StringComparison.Ordinal)) continue; // CLSID 由 shellex 扫描处理
+                    if (name.StartsWith("{", StringComparison.Ordinal)) continue; 
                     if (name.IndexOf('\\') >= 0) continue;
                     using var shellKey = classesKey.OpenSubKey(name + @"\shell", false);
                     if (shellKey != null) topLevelProgIds.Add(name);
@@ -2649,10 +3567,10 @@ namespace DiskCleaner.ViewModels
                 yield return p;
         }
 
-        /// <summary>
-        /// 清理“无效启动项”：Run/RunOnce 中指向已卸载程序（exe 已不存在）的残留启动值。
-        /// 仅删除失效的值，不影响任何仍有效的启动项。HKCU + HKLM。
-        /// </summary>
+        
+        
+        
+        
         private void CleanInvalidStartup()
         {
             CleanInvalidStartupIn(Registry.CurrentUser);
@@ -2687,11 +3605,11 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 清理“启动”文件夹中指向已卸载程序的失效 .lnk 快捷方式。
-        /// 仅当快捷方式的目标文件 / 目录确实不存在时才删除该 .lnk（移入回收站，可恢复），
-        /// 不影响任何仍有效的启动快捷方式。
-        /// </summary>
+        
+        
+        
+        
+        
         private void CleanInvalidStartupFolder()
         {
             foreach (var folder in _startupFolders)
@@ -2704,9 +3622,9 @@ namespace DiskCleaner.ViewModels
                         try
                         {
                             var target = GetShortcutTarget(lnk);
-                            // 目标为空（如 UWP/商店应用快捷方式 TargetPath 为空、靠 AppID 启动）属于
-                            // “无法确定”，绝不能判定为失效而删除，否则会误删合法开机启动项。
-                            // 仅当目标非空且文件/目录确实不存在时才判为失效。
+                            
+                            
+                            
                             bool dead = !string.IsNullOrWhiteSpace(target)
                                         && !File.Exists(target)
                                         && !Directory.Exists(target);
@@ -2723,19 +3641,19 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 解析 .lnk 快捷方式的目标路径（通过 Shell 原生 IShellLinkW COM，非 WScript.Shell）。失败返回 null。
-        /// 说明：原实现调用 WScript.Shell（Windows Script Host）解析快捷方式，会被杀软启发式判定为
-        /// "MSIL.Wsh" 木马（HEUR:Trojan/MSIL.Wsh）。改为 Shell 自身的 IShellLinkW + IPersistFile 接口，
-        /// 见 Interop/ShortcutHelper.cs。行为等价（返回原始存储路径，不解析/不展开环境变量）。
-        /// </summary>
+        
+        
+        
+        
+        
+        
         private static string GetShortcutTarget(string lnkPath)
             => ShortcutHelper.ResolveShortcutTarget(lnkPath);
 
-        /// <summary>
-        /// 清理任务计划程序中动作命令指向已卸载程序（exe 已不存在）的失效计划任务。
-        /// 删除前将任务 XML 备份到 _taskBackupDir，便于手动恢复。仅删除动作路径确实失效的任务。
-        /// </summary>
+        
+        
+        
+        
         private void CleanInvalidScheduledTask()
         {
             var dead = GetDeadScheduledTasks();
@@ -2746,7 +3664,7 @@ namespace DiskCleaner.ViewModels
             {
                 try
                 {
-                    // 备份 XML
+                    
                     if (!string.IsNullOrWhiteSpace(xml))
                     {
                         var safe = string.Concat(name.Split(Path.GetInvalidFileNameChars()));
@@ -2765,10 +3683,10 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 枚举任务计划程序内所有任务，返回动作命令指向已卸载程序（exe 已不存在）的失效任务
-        /// （含所在文件夹路径、任务名、XML 定义）。
-        /// </summary>
+        
+        
+        
+        
         private static List<(string FolderPath, string Name, string Xml)> GetDeadScheduledTasks()
         {
             var result = new List<(string, string, string)>();
@@ -2783,7 +3701,7 @@ namespace DiskCleaner.ViewModels
             }
             catch (Exception)
             {
-                // 任务计划程序不可用（如服务被禁用）时静默跳过，不影响其余清理。
+                
             }
             return result;
         }
@@ -2792,7 +3710,7 @@ namespace DiskCleaner.ViewModels
         {
             try
             {
-                var tasks = folder.GetTasks(1); // 1 = 含隐藏任务
+                var tasks = folder.GetTasks(1); 
                 foreach (dynamic task in tasks)
                 {
                     try
@@ -2806,7 +3724,7 @@ namespace DiskCleaner.ViewModels
                             var actions = task.Definition.Actions;
                             foreach (dynamic action in actions)
                             {
-                                // ActionType: 0 = Exec
+                                
                                 if ((int)action.Type == 0)
                                 {
                                     exe = action.Path as string;
@@ -2831,10 +3749,10 @@ namespace DiskCleaner.ViewModels
             catch { }
         }
 
-        /// <summary>
-        /// 清理“失效 COM/ActiveX 组件”：CLSID 中服务器文件（DLL/EXE）已被删除的失效组件。
-        /// 仅当服务器文件经校验确实不存在时才删除该 CLSID 子键，不触碰仍在使用的组件。
-        /// </summary>
+        
+        
+        
+        
         private void CleanInvalidCom()
         {
             CleanInvalidComIn(Registry.CurrentUser);
@@ -2856,9 +3774,9 @@ namespace DiskCleaner.ViewModels
                             using var sub = clsidKey.OpenSubKey(guid, false);
                             if (sub == null) continue;
 
-                            // 只有当【所有存在的服务器值】都指向已删除文件时才删除该 CLSID；
-                            // 只要还有一个服务器值（如 InprocServer32 或 LocalServer32）仍存在，就应保留，
-                            // 避免误删仍有可用架构（32/64 位）的组件。
+                            
+                            
+                            
                             bool anyServer = false;
                             bool allDead = true;
                             foreach (var v in new[] { "InprocServer32", "InprocServer64", "LocalServer32", "LocalServer64" })
@@ -2882,10 +3800,10 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 清理“孤立卸载残留”：卸载信息中卸载程序已丢失的残留项（软件已删但注册表残留）。
-        /// 仅当 UninstallString 指向的文件确实不存在时才删除该卸载子键，不影响可正常卸载的软件。
-        /// </summary>
+        
+        
+        
+        
         private void CleanInvalidUninstall()
         {
             CleanInvalidUninstallIn(Registry.CurrentUser);
@@ -2907,8 +3825,8 @@ namespace DiskCleaner.ViewModels
                             using var sub = rootKey.OpenSubKey(name, false);
                             if (sub == null) continue;
 
-                            // 系统组件（SystemComponent=1，如被取代的 KB/可再发行组件）即使
-                            // UninstallString 已失效也不应删除，避免误删系统级注册信息。
+                            
+                            
                             if ((sub.GetValue("SystemComponent") as int? ?? 0) == 1) continue;
 
                             var u = sub.GetValue("UninstallString") as string;
@@ -2925,12 +3843,12 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 清理“无效右键菜单”：文件/文件夹/桌面右键中指向已卸载程序的失效项。
-        /// 覆盖两类：① shell 动词（其 command 指向的 exe 已不存在）；② Shell 扩展（ContextMenuHandlers
-        /// 引用的 CLSID 其服务器 DLL/EXE 已不存在）。仅删除服务器文件经校验确实不存在的项，
-        /// 不影响任何仍有效的右键菜单。同时扫描 32/64 位 Classes 与 HKCU/HKLM。
-        /// </summary>
+        
+        
+        
+        
+        
+        
         private void CleanInvalidContextMenu()
         {
             CleanInvalidContextMenuIn(Registry.CurrentUser);
@@ -2945,10 +3863,10 @@ namespace DiskCleaner.ViewModels
                 {
                     using var classesKey = baseKey.OpenSubKey(classRoot, false);
                     if (classesKey == null) continue;
-                    // 遍历所有类键：固定通用类键 + 扩展名键 + ProgID 子键（嵌套向下）
+                    
                     foreach (var cls in EnumerateContextMenuClassKeys(classesKey))
                     {
-                        // ① shell 动词：command 指向的 exe 已不存在
+                        
                         try
                         {
                             using var shellKey = classesKey.OpenSubKey($@"{cls}\shell", true);
@@ -2961,7 +3879,7 @@ namespace DiskCleaner.ViewModels
                                         if (verb.StartsWith("__DC_Disabled_", StringComparison.OrdinalIgnoreCase)) continue;
                                         using var verbKey = shellKey.OpenSubKey(verb, false);
                                         if (verbKey == null) continue;
-                                        // 安全护栏：内置动词与系统/内置右键项永不清理，避免误删 Win11 第一层正常项
+                                        
                                         if (ContextMenuMapping.ProtectedVerbs.Contains(verb)) continue;
                                         if (ContextMenuMapping.IsSystemContextMenuItem(verb, null)) continue;
                                         using var cmdKey = verbKey.OpenSubKey("command", false);
@@ -2979,7 +3897,7 @@ namespace DiskCleaner.ViewModels
                         }
                         catch { }
 
-                        // ② Shell 扩展：ContextMenuHandlers 引用的 CLSID 服务器已不存在
+                        
                         try
                         {
                             using var shellexKey = classesKey.OpenSubKey($@"{cls}\shellex\ContextMenuHandlers", true);
@@ -2995,16 +3913,16 @@ namespace DiskCleaner.ViewModels
                                             guid = hk?.GetValue(null) as string;
                                         if (string.IsNullOrWhiteSpace(guid)) continue;
 
-                                        // 安全护栏①：系统 Shell 扩展（分享、Defender 扫描等 Win11 第一层项）永不清理
+                                        
                                         if (ContextMenuMapping.IsSystemContextMenuItem(handler, guid)) continue;
 
-                                        // 安全护栏②：Win11 一级(顶层/显著)右键菜单是用户可见的常用功能
-                                        // （如 Bandizip 压缩、火绒 安全扫描）。批量清理中绝不自动删除——
-                                        // 宁可漏清，不可误删。用户可在"右键管理"中手动处理这些项。
+                                        
+                                        
+                                        
                                         if (ContextMenuMapping.IsWin11TopLevelExtension(guid, handler)) continue;
 
-                                        // 只有该 CLSID 所有存在的服务器值都失效才删除，
-                                        // 避免 32 位服务器失效但 64 位仍可用时误删右键扩展。
+                                        
+                                        
                                         bool anyServer = false;
                                         bool allDead = true;
                                         foreach (var root in _clsidRoots)
@@ -3043,19 +3961,32 @@ namespace DiskCleaner.ViewModels
         private static long InvalidContextMenuSize()
         {
             long total = 0;
-            total += InvalidContextMenuSizeIn(Registry.CurrentUser);
-            total += InvalidContextMenuSizeIn(Registry.LocalMachine);
+            total += InvalidContextMenuSizeIn(Registry.CurrentUser, null);
+            total += InvalidContextMenuSizeIn(Registry.LocalMachine, null);
             return total;
         }
 
-        private static long InvalidContextMenuSizeIn(RegistryKey baseKey)
+        // 扫描无效右键菜单，同时把具体无效路径写入 item.Details，供信息图标 ⓘ 与状态文本 ToolTip 展示。
+        private long ScanInvalidContextMenu(CleanItem item)
+        {
+            var details = new List<string>();
+            long total = 0;
+            total += InvalidContextMenuSizeIn(Registry.CurrentUser, details);
+            total += InvalidContextMenuSizeIn(Registry.LocalMachine, details);
+            item.Details = details.Count > 0
+                ? $"检测到 {details.Count} 个无效右键菜单项：\n\n{string.Join("\n", details)}"
+                : null;
+            return total;
+        }
+
+        private static long InvalidContextMenuSizeIn(RegistryKey baseKey, List<string> details)
         {
             long count = 0;
             foreach (var classRoot in ContextMenuMapping.ClassRootsForInvalidScan)
             {
                 using var classesKey = baseKey.OpenSubKey(classRoot, false);
                 if (classesKey == null) continue;
-                // 遍历所有类键：通用类键 + 扩展名键 + ProgID 子键（嵌套向下，与清理逻辑保持一致）
+                
                 foreach (var cls in EnumerateContextMenuClassKeys(classesKey))
                 {
                     try
@@ -3067,10 +3998,16 @@ namespace DiskCleaner.ViewModels
                                 if (verb.StartsWith("__DC_Disabled_", StringComparison.OrdinalIgnoreCase)) continue;
                                 using var verbKey = shellKey.OpenSubKey(verb, false);
                                 if (verbKey == null) continue;
+                                if (ContextMenuMapping.ProtectedVerbs.Contains(verb)) continue;
+                                if (ContextMenuMapping.IsSystemContextMenuItem(verb, null)) continue;
                                 using var cmdKey = verbKey.OpenSubKey("command", false);
                                 if (cmdKey == null) continue;
                                 var cmdVal = cmdKey.GetValue(null) as string;
-                                if (IsDeadFileReference(cmdVal) || IsEmptyExecutableCommand(cmdVal)) count++;
+                                if (IsDeadFileReference(cmdVal) || IsEmptyExecutableCommand(cmdVal))
+                                {
+                                    count++;
+                                    details?.Add($@"{baseKey.Name}\{classRoot}\{cls}\shell\{verb}");
+                                }
                             }
                     }
                     catch { }
@@ -3081,10 +4018,13 @@ namespace DiskCleaner.ViewModels
                             foreach (var handler in shellexKey.GetSubKeyNames())
                             {
                                 if (handler.StartsWith("__DC_Disabled_", StringComparison.OrdinalIgnoreCase)) continue;
+                                if (ContextMenuMapping.IsSystemContextMenuItem(handler, null)) continue;
                                 string guid = null;
                                 using (var hk = shellexKey.OpenSubKey(handler, false))
                                     guid = hk?.GetValue(null) as string;
                                 if (string.IsNullOrWhiteSpace(guid)) continue;
+                                if (ContextMenuMapping.IsSystemContextMenuItem(handler, guid)) continue;
+                                if (ContextMenuMapping.IsWin11TopLevelExtension(guid, handler)) continue;
                                 bool anyServer = false;
                                 bool allDead = true;
                                 foreach (var root in _clsidRoots)
@@ -3102,18 +4042,22 @@ namespace DiskCleaner.ViewModels
                                     }
                                     if (!allDead) break;
                                 }
-                                if (anyServer && allDead) count++;
+                                if (anyServer && allDead)
+                                {
+                                    count++;
+                                    details?.Add($@"{baseKey.Name}\{classRoot}\{cls}\shellex\ContextMenuHandlers\{handler}");
+                                }
                             }
                     }
                     catch { }
                 }
             }
-            return count * 256; // 每个失效右键项的名义开销
+            return count * 256; 
         }
 
-        /// <summary>
-        /// 估算“无效启动项”的可清理数据量（字节，仅供参考；注册表清理主要价值在消除无效引用而非释放空间）。
-        /// </summary>
+        
+        
+        
         private static long InvalidStartupSize()
         {
             long total = 0;
@@ -3149,7 +4093,7 @@ namespace DiskCleaner.ViewModels
             return total;
         }
 
-        /// <summary>估算启动文件夹中失效 .lnk 的数量（每个约 1KB 名义开销）。</summary>
+        
         private static long InvalidStartupFolderSize()
         {
             long count = 0;
@@ -3163,9 +4107,9 @@ namespace DiskCleaner.ViewModels
                         try
                         {
                             var target = GetShortcutTarget(lnk);
-                            // 与 CleanInvalidStartupFolder 的清理判定保持一致：仅当目标非空且
-                            // 文件/目录确实不存在时才计为失效。目标为空（UWP/商店应用）属于
-                            // “无法确定”，既不计入可清理估算，也不会被实际删除。
+                            
+                            
+                            
                             bool dead = !string.IsNullOrWhiteSpace(target)
                                         && !File.Exists(target)
                                         && !Directory.Exists(target);
@@ -3179,7 +4123,7 @@ namespace DiskCleaner.ViewModels
             return count * 1024;
         }
 
-        /// <summary>估算任务计划程序中失效任务的数量（每个约 2KB 名义开销，含备份价值）。</summary>
+        
         private static long InvalidScheduledTaskSize()
             => GetDeadScheduledTasks().Count * 2048;
 
@@ -3188,7 +4132,7 @@ namespace DiskCleaner.ViewModels
             long total = 0;
             total += InvalidComCountIn(Registry.CurrentUser);
             total += InvalidComCountIn(Registry.LocalMachine);
-            return total * 256; // 每个失效组件约 256 字节名义开销
+            return total * 256; 
         }
 
         private static long InvalidComCountIn(RegistryKey baseKey)
@@ -3261,15 +4205,20 @@ namespace DiskCleaner.ViewModels
             return count;
         }
 
-        // （失效注册表的判定与清理实现见上方 IsDeadFileReference 与各 Clean/Size 方法）
+        
 
-        /// <summary>
-        /// 清理“设备驱动程序包”：仅删除未被任何设备引用的孤立 OEM 驱动包。
-        /// 通过 pnputil /enum-devices 取得在用驱动集合，凡不在其中的旧包才删除，
-        /// 因此绝不会触碰正在使用的显卡/声卡/网卡等驱动。
-        /// </summary>
+        
+        
+        
+        
+        
         private void CleanOldDriverPackages()
         {
+            if (IsSystemUpgrading())
+            {
+                _logger?.Warning("检测到系统正在执行升级/维护，已跳过设备驱动程序包清理，避免干扰进行中的升级。");
+                return;
+            }
             foreach (var (name, _) in GetOrphanDriverPackages())
             {
                 try
@@ -3291,11 +4240,11 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 返回当前被设备引用的 OEM 驱动包集合（小写）。
-        /// 任何异常或输出无效（如系统不支持 /enum-devices）一律返回 null，
-        /// 调用方据此 fail-safe：宁可什么都不删，也不误删在用驱动。
-        /// </summary>
+        
+        
+        
+        
+        
         private static HashSet<string> GetInUseDriverPackages()
         {
             try
@@ -3310,7 +4259,7 @@ namespace DiskCleaner.ViewModels
                 if (proc == null) return null;
                 var output = proc.StandardOutput.ReadToEnd();
                 proc.WaitForExit();
-                // 校验输出确为 enum-devices 结果，避免不支持该参数时误判（fail-open 风险）。
+                
                 if (proc.ExitCode != 0 || string.IsNullOrWhiteSpace(output) ||
                     !output.Contains("Instance ID", StringComparison.OrdinalIgnoreCase))
                 {
@@ -3321,8 +4270,8 @@ namespace DiskCleaner.ViewModels
                 {
                     set.Add(m.Groups[1].Value);
                 }
-                // 若未解析到任何在用驱动（可能标签被本地化或格式变更），视为不可靠，
-                // 宁可放弃删除，也绝不把在用驱动误判为孤立包而全部删掉。
+                
+                
                 if (set.Count == 0) return null;
                 return set;
             }
@@ -3332,10 +4281,10 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        /// <summary>
-        /// 返回未被任何设备引用的孤立 OEM 驱动包（名称 + 驱动存储路径）。
-        /// 若无法确定在用集合（GetInUseDriverPackages 返回 null），则返回空列表——不删除任何包。
-        /// </summary>
+        
+        
+        
+        
         private static List<(string Name, string Path)> GetOrphanDriverPackages()
         {
             var inUse = GetInUseDriverPackages();
@@ -3363,7 +4312,7 @@ namespace DiskCleaner.ViewModels
                 string currentName = null;
                 foreach (var line in output.Split('\n'))
                 {
-                    // 空行分隔不同驱动包块，重置 currentName，防止上一块残留名称配对到本块路径
+                    
                     if (string.IsNullOrWhiteSpace(line)) { currentName = null; continue; }
                     var mName = Regex.Match(line, @"(?im)^\s*Published Name:\s*(oem\d+\.inf)");
                     if (mName.Success)
@@ -3384,12 +4333,12 @@ namespace DiskCleaner.ViewModels
             }
             catch
             {
-                // 解析失败也保持空列表，不误删。
+                
             }
             return result;
         }
 
-        // ---------- 极限清理工具 ----------
+        
         private void AddOptimizeTools()
         {
             var tools = new ObservableCollection<OptimizeTool>
@@ -3430,6 +4379,8 @@ namespace DiskCleaner.ViewModels
                 RequiresAdmin = requiresAdmin,
                 Command = new RelayCommand(_ => _ = RunOptimizeAsync(action))
             };
+            tool.CancelCommand = new RelayCommand(_ => CancelOptimize(tool));
+            tool.ClearCommand = new RelayCommand(_ => tool.ClearOutput());
             if (hasRestore)
             {
                 tool.HasRestore = true;
@@ -3439,7 +4390,7 @@ namespace DiskCleaner.ViewModels
             return tool;
         }
 
-        // ---------- 递归枚举所有叶子清理项 ----------
+        
         private static IEnumerable<CleanItem> AllCleanItems(IEnumerable<CleanGroup> groups)
         {
             foreach (var g in groups)
@@ -3453,10 +4404,10 @@ namespace DiskCleaner.ViewModels
                 }
         }
 
-        /// <summary>
-        /// 应用「仅显示有内容的项」过滤：扫描/清理后调用，使 Size 为 0 的项隐藏（AlwaysShow 的动作型项除外）。
-        /// 这样列表只展示真正扫描到垃圾的项，0B 的不再显示。
-        /// </summary>
+        
+        
+        
+        
         private void ApplyVisibilityFilter()
         {
             foreach (var item in AllCleanItems(CleanGroups))
@@ -3465,10 +4416,20 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        // ---------- 扫描 ----------
+        
+        
+        
+        
+        
+        private static void ApplyDefaultCheck(CleanItem item)
+        {
+            item.IsChecked = item.CanClean != null && item.CanClean() && item.Size > 0;
+        }
+
+        
         private async Task ScanAsync()
         {
-            if (IsBusy) return;
+            if (IsBusy || AnyToolRunning) return;
             SetIsBusy(true);
             _cts = NewCts();
             try
@@ -3481,17 +4442,20 @@ namespace DiskCleaner.ViewModels
                 ScanCurrentItem = "准备扫描...";
 
                 var items = AllCleanItems(CleanGroups).ToList();
+                foreach (var it in items)
+                    it.TargetPaths = GetItemTargetRoots(it.Id);
                 int total = items.Count;
 
-                // 第一阶段：在 UI 线程上设置初始状态（CanClean 检查很快，串行即可）
+                
                 var itemsToScan = new List<CleanItem>();
                 foreach (var item in items)
                 {
+                    item.ErrorMessage = null;
+                    item.Details = null;
                     if (item.CanClean != null && item.CanClean())
                     {
-                        // 扫描后仅默认勾选“安全级”项；谨慎级（驱动包、升级回滚、大型依赖缓存等）
-                        // 保持不勾选，避免用户直接一键清理造成不可逆操作。回收站项扫描后再单独取消勾选。
-                        item.IsChecked = item.Risk == RiskLevel.Safe;
+                        
+                        item.IsChecked = false;
                         itemsToScan.Add(item);
                     }
                     else
@@ -3502,8 +4466,8 @@ namespace DiskCleaner.ViewModels
                     }
                 }
 
-                // 第二阶段：并行扫描，限制并发度避免磁盘 I/O 争抢（HDD 上并发过高反而更慢）
-                int done = total - itemsToScan.Count; // 不需要扫描的项已"完成"
+                
+                int done = total - itemsToScan.Count; 
                 long totalSize = 0;
                 int concurrency = Math.Min(4, Environment.ProcessorCount);
                 var semaphore = new SemaphoreSlim(concurrency);
@@ -3515,7 +4479,7 @@ namespace DiskCleaner.ViewModels
                     await semaphore.WaitAsync();
                     try
                     {
-                        // 标记「正在扫描」的项，UI 进度区实时显示当前项名
+                        
                         _uiDispatcher?.BeginInvoke(new Action(() => ScanCurrentItem = item.Name));
                         sizes[idx] = await Task.Run(() => EstimateItemSize(item));
                     }
@@ -3524,7 +4488,7 @@ namespace DiskCleaner.ViewModels
                     {
                         semaphore.Release();
                         var localDone = Interlocked.Increment(ref done);
-                        // 通过 Dispatcher 异步更新 UI 进度（不阻塞后台扫描线程）
+                        
                         _ = _uiDispatcher.BeginInvoke(new Action(() =>
                         {
                             CleanProgressText = $"扫描 {localDone}/{total}";
@@ -3535,23 +4499,21 @@ namespace DiskCleaner.ViewModels
 
                 await Task.WhenAll(scanTasks);
 
-                // 第三阶段：在 UI 线程批量更新扫描结果（避免逐项 Dispatcher 调用）
+                
                 for (int i = 0; i < itemsToScan.Count; i++)
                 {
                     itemsToScan[i].Size = sizes[i];
                     itemsToScan[i].Status = ScanStatus.Scanned;
-                    // 回收站项默认不勾选，不应计入顶部“可清理”总量
+                    ApplyDefaultCheck(itemsToScan[i]); 
+                    
                     if (itemsToScan[i].Id != "empty_recycle_bin")
                         totalSize += sizes[i];
                 }
 
                 RecommendedTotalText = $"{FormatSize(totalSize)} 可清理";
                 StatusText = "扫描完成";
-                ApplyVisibilityFilter(); // 扫描后隐藏 0B 的清理项，只显示扫描到内容的项
-                HasScanned = true; // 首次扫描完成后才显示结果列表
-                // 回收站项扫描期间保持勾选，扫描结束后取消勾选，避免默认清空回收站
-                var recycleScanItem = AllCleanItems(CleanGroups).FirstOrDefault(c => c.Id == "empty_recycle_bin");
-                if (recycleScanItem != null) recycleScanItem.IsChecked = false;
+                ApplyVisibilityFilter(); 
+                HasScanned = true; 
                 UpdateDriveInfo();
             }
             catch (Exception ex)
@@ -3561,7 +4523,7 @@ namespace DiskCleaner.ViewModels
             }
             finally
             {
-                // 无论成功/失败/取消都结束扫描态，复位进度条，避免卡在中间进度
+                
                 IsScanning = false;
                 ScanCurrentItem = "";
                 _cts?.Dispose();
@@ -3569,7 +4531,7 @@ namespace DiskCleaner.ViewModels
             }
         }
 
-        // ---------- 清理 ----------
+        
         private async Task CleanAsync()
         {
             var selected = AllCleanItems(CleanGroups)
@@ -3579,112 +4541,49 @@ namespace DiskCleaner.ViewModels
                 MessageBox.Show("未选中任何可清理项。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
-            if (IsBusy) return;
+            if (IsBusy || AnyToolRunning) return;
             SetIsBusy(true);
             IsCleaning = true;
             CleanFileCount = 0;
             _cts = NewCts();
             var uiDispatcher = _uiDispatcher;
-            // 本次清理默认“移入回收站”；极速模式下 Safe 级直接删除、Caution 级仍进回收站。
-            // 回收站项勾选时才在最后清空。
-            var prevUseRecycleBin = CleanService.UseRecycleBin;
-            bool fastClean = _config?.FastClean == true;
-            CleanService.UseRecycleBin = true;
-            // 将“清空回收站”项从主列表分离，确保它在所有垃圾都移入回收站后再执行。
+            
+            
             var recycleItem = selected.FirstOrDefault(c => c.Id == "empty_recycle_bin");
+            if (recycleItem != null) recycleItem.IsVisible = true; 
             var mainItems = selected.Where(c => c != recycleItem).ToList();
             try
             {
                 StatusText = "正在清理...";
-                // 实际删除工作放到后台线程，避免阻塞 UI；通过 Dispatcher 切回 UI 线程实时更新进度与状态。
+
+                
+                void ProcessCleanItem(CleanItem item)
+                {
+                    if (_cts.Token.IsCancellationRequested) return;
+                    CleanSingleItem(item);
+                }
+
                 await Task.Run(() =>
                 {
+                    
+                    var sem = new SemaphoreSlim(Math.Max(1, Math.Min(4, Environment.ProcessorCount)));
+                    var tasks = new List<Task>(mainItems.Count);
                     foreach (var item in mainItems)
                     {
                         if (_cts.Token.IsCancellationRequested) break;
-                        try
+                        try { sem.Wait(_cts.Token); }
+                        catch (OperationCanceledException) { break; }
+                        tasks.Add(Task.Run(() =>
                         {
-                            // 每个清理项执行前按「极速模式 + 风险等级」切换删除方式。
-                            // 清理在单线程顺序执行，切换全局开关不会产生竞态。
-                            CleanService.UseRecycleBin = !(fastClean && item.Risk == RiskLevel.Safe);
-
-                            uiDispatcher?.Invoke(() =>
-                            {
-                                item.Status = ScanStatus.Cleaning;
-                                CleanProgressText = $"正在清理：{item.Name}";
-                            });
-
-                            // 优先使用支持部分成功报告的新接口，否则回退到旧 Action + try/catch
-                            CleanService.CleanResult result = default;
-                            bool hasResultAware = item.CleanActionWithResult != null;
-
-                            if (hasResultAware)
-                            {
-                                result = item.CleanActionWithResult();
-                            }
-                            else
-                            {
-                                item.CleanAction?.Invoke();
-                                result = new CleanService.CleanResult { FilesSucceeded = 1 };
-                            }
-
-                            uiDispatcher?.Invoke(() =>
-                            {
-                                if (result.FullySucceeded || (result.NoOperation && !hasResultAware))
-                                {
-                                    // 全部成功（或旧方法无异常完成）
-                                    item.Status = ScanStatus.Cleaned;
-                                    item.ErrorMessage = null;
-                                }
-                                else if (result.PartiallySucceeded)
-                                {
-                                    // 部分成功：能删的都删了，少数被占用/保护
-                                    item.Status = ScanStatus.PartiallyCleaned;
-                                    item.ErrorMessage = result.ToString();
-                                    // 部分成功时保留勾选——用户可能想重试剩余项
-                                }
-                                else if (result.FullyFailed)
-                                {
-                                    // 全部失败（零文件被删除）
-                                    item.Status = ScanStatus.Error;
-                                    item.ErrorMessage = result.ToString();
-                                    item.IsChecked = false;
-                                }
-                                else if (result.NoOperation)
-                                {
-                                    // 无操作（目录已为空/不存在）→ 视为已清理
-                                    item.Status = ScanStatus.Cleaned;
-                                    item.ErrorMessage = null;
-                                }
-                                else
-                                {
-                                    // 旧路径无异常 → 成功
-                                    item.Status = ScanStatus.Cleaned;
-                                    item.ErrorMessage = null;
-                                }
-
-                                CleanFileCount++;
-                                CleanProgressText = item.Status == ScanStatus.Cleaned ? $"已清理：{item.Name}"
-                                    : item.Status == ScanStatus.PartiallyCleaned ? $"部分清理：{item.Name}"
-                                    : $"失败：{item.Name}";
-                            });
-                        }
-                        catch (Exception ex)
-                        {
-                            // 仅旧 void 方法或灾难性错误会走到这里
-                            uiDispatcher?.Invoke(() =>
-                            {
-                                item.ErrorMessage = ex.Message;
-                                item.Status = ScanStatus.Error;
-                                item.IsChecked = false;
-                                CleanFileCount++;
-                                CleanProgressText = $"失败：{item.Name}";
-                            });
-                            _logger.Error($"清理失败: {item.Name}", ex);
-                        }
+                            try { ProcessCleanItem(item); }
+                            finally { sem.Release(); }
+                        }, _cts.Token));
                     }
+                    try { Task.WhenAll(tasks).Wait(_cts.Token); }
+                    catch (OperationCanceledException) { }
+                    catch (AggregateException ae) { ae.Handle(e => e is OperationCanceledException); }
 
-                    // 所有垃圾已移入回收站，若勾选了“清空回收站”，最后再彻底清空。
+                    
                     if (recycleItem != null)
                     {
                         uiDispatcher?.Invoke(() =>
@@ -3714,11 +4613,11 @@ namespace DiskCleaner.ViewModels
                 }, _cts.Token);
 
                 StatusText = "清理完成";
-                CleanProgressText = string.Empty; // 清理结束后清掉最后一项的「已清理：XXX」提示
-                // 清理后重新统计「剩余可清理」：
-                //   Cleaned      → 大小归零、取消勾选（已全部清完）
-                //   PartiallyCleaned → 保留原大小估算、保留勾选（用户可重试剩余项），ErrorMessage 已含实际释放量
-                //   Error        → 保留大小、取消勾选
+                CleanProgressText = string.Empty; 
+                
+                
+                
+                
                 long remaining = 0;
                 foreach (var item in AllCleanItems(CleanGroups))
                 {
@@ -3731,7 +4630,7 @@ namespace DiskCleaner.ViewModels
                     {
                         item.IsChecked = false;
                     }
-                    // PartiallyCleaned: 保持 Size 和 IsChecked 不变，用户可重试
+                    
                     else if (item.Id == "empty_recycle_bin")
                     {
                         item.Size = CleanService.GetRecycleBinSize();
@@ -3740,7 +4639,7 @@ namespace DiskCleaner.ViewModels
                         remaining += item.Size;
                 }
                 RecommendedTotalText = remaining > 0 ? $"{FormatSize(remaining)} 可清理" : "—";
-                ApplyVisibilityFilter(); // 清理后隐藏已清零（0B）的项，只保留仍有内容/动作型项
+                ApplyVisibilityFilter(); 
                 UpdateDriveInfo();
                 _ = SaveConfigAsync();
             }
@@ -3752,20 +4651,19 @@ namespace DiskCleaner.ViewModels
             }
             finally
             {
-                // 恢复全局回收站开关为清理前的设置，避免影响其它清理逻辑。
-                CleanService.UseRecycleBin = prevUseRecycleBin;
                 _cts?.Dispose();
                 IsCleaning = false;
                 SetIsBusy(false);
+                RefreshBrowserProcessStates();
             }
         }
 
 
-        // ---------- 单一清理项的预估大小 ----------
-        /// <summary>
-        /// 估算某个清理项的可清理数据大小（字节）。扫描时调用。
-        /// 路径必须与 CleanXxx 方法中实际清理的路径完全一致，否则扫描显示的大小会与实际清理的大小不符。
-        /// </summary>
+        
+        
+        
+        
+        
         private long EstimateItemSize(CleanItem item)
         {
             try
@@ -3781,10 +4679,10 @@ namespace DiskCleaner.ViewModels
                         var miniDumpDir = Path.Combine(winDir, "Minidump");
                         if (Directory.Exists(miniDumpDir))
                             size += DiskUtils.FilesSize(miniDumpDir, "*.dmp");
-                        // 复用 DiskUtils.FilesSize：单次枚举 + 读取缓存的 Length，避免
-                        // Directory.GetFiles 全量数组 + 逐文件 new FileInfo().Length 重复 stat。
+                        
+                        
                         size += DiskUtils.FilesSize(winDir, "*.dmp");
-                        // MEMORY.DMP 由 memory_dump 项单独统计，此处排除，避免重复计数
+                        
                         var memoryDumpFile = Path.Combine(winDir, "MEMORY.DMP");
                         if (File.Exists(memoryDumpFile))
                         {
@@ -3793,7 +4691,7 @@ namespace DiskCleaner.ViewModels
                         return size;
                     case "windows_logs": return DirSize(Path.Combine(winDir, "Logs"));
                     case "thumbnail_cache":
-                        // 仅估算 thumbcache_*.db 和 iconcache_*.db（与清理路径一致），不计算 Explorer 目录中的其他文件
+                        
                         return ThumbIconCacheDbSize(Path.Combine(local, @"Microsoft\Windows\Explorer"));
                     case "inet_cache": return DirSize(Path.Combine(local, @"Microsoft\Windows\INetCache"));
                     case "wer": return DirSize(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), @"Microsoft\Windows\WER"));
@@ -3802,14 +4700,53 @@ namespace DiskCleaner.ViewModels
                              + DirSize(Path.Combine(winDir, @"SoftwareDistribution\Download"));
                     case "edge_cache":
                         return BrowserProfileCachesSize(Path.Combine(local, @"Microsoft\Edge\User Data"), new[] { "Cache", "Code Cache" });
+                    case "edge_update_cache":
+                        {
+                            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), @"Microsoft\EdgeUpdate\Download");
+                            return Directory.Exists(dir) ? DirSize(dir) : 0;
+                        }
+                    case "edge_bak":
+                        {
+                            var userData = Path.Combine(local, @"Microsoft\Edge\User Data");
+                            if (!Directory.Exists(userData)) return 0;
+                            long s = 0;
+                            var dirs = new List<string> { userData };
+                            try { dirs.AddRange(Directory.GetDirectories(userData, "Profile *")); } catch { }
+                            foreach (var d in dirs) s += DiskUtils.FilesSize(d, "*.bak");
+                            return s;
+                        }
                     case "quark_cache":
                         {
                             long q = 0;
-                            q += BrowserProfileCachesSize(Path.Combine(local, @"Quark\Quark\User Data"), new[] { "Cache", "Code Cache" });
-                            q += BrowserProfileCachesSize(Path.Combine(local, @"夸克浏览器\User Data"), new[] { "Cache", "Code Cache" });
+                            foreach (var root in QuarkUserDataRoots)
+                            {
+                                var userData = Path.Combine(local, root);
+                                if (Directory.Exists(userData))
+                                    q += BrowserProfileCachesSize(userData, QuarkCacheSubdirs);
+                            }
                             var appCache = Path.Combine(local, @"Quark\Application\Cache");
                             if (Directory.Exists(appCache)) q += DirSize(appCache);
                             return q;
+                        }
+                    case "androws_cef_cache":
+                        {
+                            var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                            var cefRoot = Path.Combine(roaming, @"Tencent\Androws\cef\CEF_Androws");
+                            return Directory.Exists(cefRoot) ? BrowserProfileCachesSize(cefRoot, AndrowsCefCacheSubdirs) : 0;
+                        }
+                    case "github_cache":
+                        {
+                            var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                            var cacheRoot = Path.Combine(roaming, @"GitHub Desktop\Cache");
+                            if (!Directory.Exists(cacheRoot)) return 0;
+                            return DirSize(Path.Combine(cacheRoot, "Cache_Data"))
+                                 + DirSize(Path.Combine(cacheRoot, "No_Vary_Search"));
+                        }
+                    case "ie_cache":
+                    case "legacy_edge_cache":
+                        {
+                            var dir = Path.Combine(local, @"Microsoft\Windows\WebCache");
+                            return Directory.Exists(dir) ? DirSize(dir) : 0;
                         }
                     case "chrome_cache":
                         return BrowserProfileCachesSize(Path.Combine(local, @"Google\Chrome\User Data"), new[] { "Cache", "Code Cache", "Media Cache" });
@@ -3828,7 +4765,7 @@ namespace DiskCleaner.ViewModels
                         return BrowserProfileCachesSize(Path.Combine(local, @"BraveSoftware\Brave-Browser\User Data"), new[] { "Cache", "Code Cache" });
                     case "opera_cache":
                         {
-                            // Opera Software 下可能有多个浏览器分支（Opera Stable / Opera GX 等），各自含 Cache/Code Cache
+                            
                             long oc = 0;
                             var operaRoot = Path.Combine(local, @"Opera Software");
                             if (Directory.Exists(operaRoot))
@@ -3848,7 +4785,7 @@ namespace DiskCleaner.ViewModels
                             return ds;
                         }
                     case "netease_cache":
-                        // 仅估算 Cache（与清理路径一致）；webdata 是登录凭据，不清理也不计入
+                        
                         return DirSize(Path.Combine(local, @"NetEase\CloudMusic\Cache"));
                     case "steam_cache":
                         {
@@ -3873,7 +4810,7 @@ namespace DiskCleaner.ViewModels
                         return DirSize(Path.Combine(winDir, @"System32\LogFiles\WMI\RtBackup"))
                              + DirSize(Path.Combine(winDir, @"Logs\MeasuredBoot"));
                     case "recent_items":
-                        // 只估算真正的最近访问 .lnk 快捷方式大小；Quick Access / 跳转列表数据不再清理，也不计入。
+                        
                         return LnkFilesSize(Environment.GetFolderPath(Environment.SpecialFolder.Recent));
                     case "clipboard_history":
                         return DirSize(Path.Combine(local, @"Microsoft\Windows\Clipboard"));
@@ -3884,7 +4821,7 @@ namespace DiskCleaner.ViewModels
                     case "invalid_uninstall":
                         return InvalidUninstallSize();
                     case "invalid_context_menu":
-                        return InvalidContextMenuSize();
+                        return ScanInvalidContextMenu(item);
                     case "invalid_file_association":
                         return InvalidFileAssociationSize();
                     case "invalid_shared_dlls":
@@ -3893,6 +4830,12 @@ namespace DiskCleaner.ViewModels
                         return InvalidMuiCacheSize();
                     case "invalid_appcompat_layers":
                         return InvalidAppCompatLayersSize();
+                    case "invalid_appcompat_store":
+                        return InvalidCompatStoreSize();
+                    case "invalid_firewall_rule":
+                        return InvalidFirewallRulesSize();
+                    case "explorer_traces":
+                        return ExplorerTracesSize();
                     case "driver_packages":
                         {
                             long total = 0;
@@ -3935,7 +4878,7 @@ namespace DiskCleaner.ViewModels
                         }
                     case "thunder_cache":
                         {
-                            // 仅估算 Cache + XLLiveUD（与清理路径一致）；Torrents 是用户收藏种子，不清理也不计入
+                            
                             long tc = 0;
                             foreach (var c in new[]
                             {
@@ -4005,7 +4948,7 @@ namespace DiskCleaner.ViewModels
                         }
                     case "wemeet_cache":
                         {
-                            // 仅估算 Cache + AppCache（与清理路径一致）；Recording 是用户录制视频，不清理也不计入
+                            
                             long mc = 0;
                             foreach (var c in new[]
                             {
@@ -4046,7 +4989,7 @@ namespace DiskCleaner.ViewModels
                         }
                     case "spotify_cache":
                         {
-                            // 仅估算 cache + Storage（与清理路径一致）；Data 是离线音乐，不清理也不计入
+                            
                             long sp = 0;
                             var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
                             foreach (var c in new[]
@@ -4093,7 +5036,7 @@ namespace DiskCleaner.ViewModels
                     case "empty_recycle_bin":
                         return CleanService.GetRecycleBinSize();
 
-                    // ===== 新增：系统级清理项估算 =====
+                    
                     case "windows_upgrade_temp":
                         {
                             var sysDrive = Path.GetPathRoot(winDir);
@@ -4134,7 +5077,7 @@ namespace DiskCleaner.ViewModels
                             return File.Exists(f) ? new FileInfo(f).Length : 0;
                         }
 
-                    // ===== 新增：即时通讯估算 =====
+                    
                     case "wechat_cache":
                         return WeChatCacheSize();
                     case "qq_cache":
@@ -4145,13 +5088,13 @@ namespace DiskCleaner.ViewModels
                         return DirSize(Path.Combine(local, @"MailMaster\Cache"))
                              + DirSize(Path.Combine(local, @"MailMaster\Application\Cache"));
 
-                    // ===== 新增：浏览器估算（多 Profile） =====
+                    
                     case "qq_browser_cache":
                         return BrowserProfileCachesSize(Path.Combine(local, @"Tencent\QQBrowser\User Data"), new[] { "Cache", "Code Cache" });
                     case "vivaldi_cache":
                         return BrowserProfileCachesSize(Path.Combine(local, @"Vivaldi\User Data"), new[] { "Cache", "Code Cache" });
 
-                    // ===== 新增：音视频估算 =====
+                    
                     case "qq_music_cache":
                         return DirSize(Path.Combine(local, @"Tencent\QQMusic\Cache")) + DirSize(Path.Combine(local, @"QQMusic\Cache"));
                     case "kugou_cache":
@@ -4163,7 +5106,7 @@ namespace DiskCleaner.ViewModels
                     case "youku_cache":
                         return DirSize(Path.Combine(local, @"Youku\YoukuClient\cache")) + DirSize(Path.Combine(local, @"Youku\cache"));
 
-                    // ===== 新增：办公与游戏估算 =====
+                    
                     case "wps_cache":
                         return DirSize(Path.Combine(local, @"Kingsoft\office6\cache")) + DirSize(Path.Combine(local, @"WPS\cache"));
                     case "epic_cache":
@@ -4179,7 +5122,7 @@ namespace DiskCleaner.ViewModels
                             return ec;
                         }
 
-                    // ===== 新增：开发工具缓存估算 =====
+                    
                     case "vscode_cache":
                         {
                             var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -4246,27 +5189,30 @@ namespace DiskCleaner.ViewModels
                     case "nuget_cache":
                         return DirSize(Path.Combine(local, @"NuGet\v3-cache")) + DirSize(Path.Combine(local, @"NuGet\Cache"));
 
-                    default: return 0;
+                    default:
+                        if (AppLogDirectories().TryGetValue(item.Id, out var logDirs))
+                            return AppLogDirsSize(logDirs);
+                        return 0;
                 }
             }
             catch { return 0; }
         }
 
-        /// <summary>
-        /// 计算某目录下所有 .lnk 快捷方式的总字节数（用于「Windows 最近访问」大小估算）。
-        /// </summary>
+        
+        
+        
         private static long LnkFilesSize(string dir)
         {
-            // 复用 DiskUtils.FilesSize：单次枚举 + 读取缓存的 Length，避免
-            // Directory.GetFiles 全量数组 + 逐文件 new FileInfo().Length 重复 stat。
+            
+            
             return DiskUtils.FilesSize(dir, "*.lnk");
         }
 
-        /// <summary>
-        /// 估算浏览器多 Profile 缓存目录总大小（与 CleanBrowserProfileCaches 路径一致）。
-        /// 严格按 Profile 命名规范匹配（Default / Profile N / Guest Profile / System Profile），
-        /// 不计算 User Data 根目录下的 Cookies / Login Data / Bookmarks 等用户数据。
-        /// </summary>
+        
+        
+        
+        
+        
         private static long BrowserProfileCachesSize(string userDataRoot, string[] cacheSubdirs, bool flatten = false)
         {
             if (!Directory.Exists(userDataRoot)) return 0;
@@ -4301,13 +5247,13 @@ namespace DiskCleaner.ViewModels
             return total;
         }
 
-        /// <summary>估算目录中匹配通配符的文件总大小（顶层，不递归）。</summary>
+        
         private static long FilesByPatternSize(string dir, string pattern)
         {
             return DiskUtils.FilesSize(dir, pattern);
         }
 
-        /// <summary>估算 Explorer 目录中 thumbcache_*.db 和 iconcache_*.db 的总大小（与清理路径一致）。</summary>
+        
         private static long ThumbIconCacheDbSize(string explorerDir)
         {
             if (!Directory.Exists(explorerDir)) return 0;
@@ -4315,7 +5261,7 @@ namespace DiskCleaner.ViewModels
                  + DiskUtils.FilesSize(explorerDir, "iconcache_*.db");
         }
 
-        /// <summary>估算微信所有账号的 FileStorage\Cache 总大小（与清理路径一致，不计算 Image/Video/MsgAttach/File）。</summary>
+        
         private static long WeChatCacheSize()
         {
             var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
@@ -4336,7 +5282,7 @@ namespace DiskCleaner.ViewModels
             return total;
         }
 
-        /// <summary>估算 QQ 所有账号的 RichMedia 总大小（与清理路径一致，不计算 Image/Video/FileRecv）。</summary>
+        
         private static long QQCacheSize()
         {
             var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
@@ -4349,10 +5295,21 @@ namespace DiskCleaner.ViewModels
                 var richMedia = Path.Combine(qqDir, "RichMedia");
                 if (Directory.Exists(richMedia)) total += DirSize(richMedia);
             }
+
+            
+            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            foreach (var c in new[]
+            {
+                Path.Combine(local, @"Tencent\QQ\Cache"),
+                Path.Combine(local, @"Tencent\QQ\Code Cache"),
+                Path.Combine(local, @"Tencent\QQ\GPUCache")
+            })
+                if (Directory.Exists(c)) total += DirSize(c);
+
             return total;
         }
 
-        /// <summary>估算企业微信所有账号的 Cache 总大小（与清理路径一致，不计算 Image/Video/Msg）。</summary>
+        
         private static long WXWorkCacheSize()
         {
             var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
@@ -4367,19 +5324,13 @@ namespace DiskCleaner.ViewModels
             return total;
         }
 
-        // ---------- 刷新（重新评估可清理） ----------
+        
         private void RefreshItems()
         {
+            
             foreach (var item in AllCleanItems(CleanGroups))
             {
-                // 仅“安全”级随刷新自动勾选；“谨慎”级保持用户当前选择，避免误勾高风险项。
-                if (item.Risk != RiskLevel.Safe) continue;
-                // 回收站项始终不自动勾选，由用户手动决定。
-                if (item.Id == "empty_recycle_bin") continue;
-                if (item.CanClean != null)
-                {
-                    item.IsChecked = item.CanClean();
-                }
+                ApplyDefaultCheck(item);
             }
             StatusText = "已刷新";
             long total = AllCleanItems(CleanGroups)
@@ -4390,19 +5341,22 @@ namespace DiskCleaner.ViewModels
             UpdateDriveInfo();
         }
 
-        // ---------- 极限清理执行 ----------
-        /// <summary>当前进程是否以管理员身份运行（供极限清理 UI 判定“需管理员”禁用态）。</summary>
+        
+        
         public bool IsElevated => SystemOptimizeService.IsRunningAsAdministrator();
 
         private async Task RunOptimizeAsync(string action, OptimizeTool specificTool = null)
         {
-            // 直接按 Action 标识定位工具（specificTool 用于“恢复”等不对应独立工具项的动作）。
+            
             var tool = specificTool ?? OptimizeTools.FirstOrDefault(t => t.Action == action);
             if (tool == null) return;
 
+            
             if (IsBusy) return;
 
-            // 未提权时，需管理员权限的工具直接给出清晰中文提示，而非启动 DISM/SFC 后拿到乱码的“无权限”报错。
+            
+            if (tool.IsRunning) return;
+
             if (tool.RequiresAdmin && !SystemOptimizeService.IsRunningAsAdministrator())
             {
                 const string msg = "本操作需要管理员权限，请右键以“管理员身份运行”本程序后重试。";
@@ -4412,21 +5366,26 @@ namespace DiskCleaner.ViewModels
                 return;
             }
 
-            SetIsBusy(true);
+            
+            var cts = new CancellationTokenSource();
+            _toolCtsMap[tool] = cts;
 
+            tool.ClearOutput();
             tool.StatusText = "执行中...";
             tool.IsRunning = true;
-            tool.ProgressValue = 0;
-            tool.IsIndeterminate = true;
-            var progress = new Progress<string>(msg => tool.StatusText = msg);
-            var percentProgress = new Progress<int>(p =>
+            var progress = new Progress<string>(msg =>
             {
-                tool.ProgressValue = p;
-                tool.IsIndeterminate = false;
+                tool.AppendOutput(msg);
+                tool.StatusText = msg;
             });
             try
             {
-                var result = await _optimizeService.ExecuteAsync(action, progress, percentProgress);
+                var result = await _optimizeService.ExecuteAsync(action, progress, null, cts.Token);
+                if (cts.IsCancellationRequested)
+                {
+                    result = "操作已取消。";
+                }
+                tool.AppendOutput(result);
                 tool.StatusText = result;
                 OptimizeLogList.Add($"{DateTime.Now:HH:mm:ss} [{tool.Name}] {result}");
                 StatusText = $"{tool.Name}：{result}";
@@ -4439,46 +5398,66 @@ namespace DiskCleaner.ViewModels
             finally
             {
                 tool.IsRunning = false;
-                SetIsBusy(false);
+                if (_toolCtsMap.TryRemove(tool, out var removed))
+                {
+                    removed.Dispose();
+                }
             }
         }
 
-        // ---------- 空文件夹扫描 / 删除 ----------
+        private void CancelOptimize(OptimizeTool tool)
+        {
+            if (tool == null || !tool.IsRunning) return;
+            if (_toolCtsMap.TryGetValue(tool, out var cts))
+            {
+                try { cts.Cancel(); } catch { }
+            }
+        }
+
+        
         private async Task ScanEmptyFoldersAsync()
         {
-            if (IsBusy) return;
+            if (IsBusy || AnyToolRunning) return;
             SetIsBusy(true);
             try
             {
                 _cts = NewCts();
                 StatusText = "正在扫描空文件夹...";
                 EmptyFolderList.Clear();
-                EmptyFolderReportText = "";
-                EmptyFolderStatusText = "扫描中...";
+                EmptyFolderReportText = "扫描中...";
 
-                // 复用 SpaceAnalyzer.GetEmptyFoldersAsync：迭代遍历、跳过重解析点（如 Documents and Settings）、
-                // 按目录捕获异常、支持取消，避免对整个 C: 递归时因首个不可访问目录而整体中止。
+                
+                
                 var root = Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.Windows));
                 var folders = await _spaceAnalyzer.GetEmptyFoldersAsync(root, _cts.Token);
 
                 EmptyFolderList.Clear();
                 foreach (var f in folders) EmptyFolderList.Add(f);
-                EmptyFolderReportText = folders.Count == 0
-                    ? "未发现空文件夹。"
-                    : string.Join(Environment.NewLine, folders);
-                EmptyFolderStatusText = $"找到 {folders.Count} 个空文件夹";
+                if (folders.Count == 0)
+                {
+                    EmptyFolderReportText = "未发现空文件夹。";
+                }
+                else
+                {
+                    EmptyFolderReportText = string.Join(Environment.NewLine, folders)
+                        + Environment.NewLine + Environment.NewLine
+                        + $"找到了 {folders.Count} 个空文件夹";
+                }
+                EmptyFolderStatusText = "";
                 StatusText = "空文件夹扫描完成";
                 UpdateDriveInfo();
             }
             catch (OperationCanceledException)
             {
-                EmptyFolderStatusText = "扫描已取消。";
+                EmptyFolderReportText = "扫描已取消。";
+                EmptyFolderStatusText = "";
                 StatusText = "已取消";
             }
             catch (Exception ex)
             {
                 _logger.Error("空文件夹扫描失败", ex);
-                EmptyFolderStatusText = "扫描失败：" + ex.Message;
+                EmptyFolderReportText = "扫描失败：" + ex.Message;
+                EmptyFolderStatusText = "";
                 StatusText = "空文件夹扫描失败";
             }
             finally
@@ -4492,7 +5471,8 @@ namespace DiskCleaner.ViewModels
         {
             if (!EmptyFolderList.Any())
             {
-                EmptyFolderStatusText = "没有可删除的空文件夹。";
+                EmptyFolderReportText = "没有可删除的空文件夹。";
+                EmptyFolderStatusText = "";
                 return;
             }
             if (MessageBox.Show($"确认删除 {EmptyFolderList.Count} 个空文件夹？", "确认",
@@ -4504,15 +5484,15 @@ namespace DiskCleaner.ViewModels
             await Task.Run(() =>
             {
                 int deleted = 0;
-                // 按目录深度（路径分隔符数量）降序、再按路径长度降序排序：
-                // 先删子目录、后删父目录，避免父目录因仍有子项残留而单轮删不掉。
+                
+                
                 foreach (var dir in EmptyFolderList.ToList()
                              .OrderByDescending(d => d.Count(c => c == '\\'))
                              .ThenByDescending(d => d.Length))
                 {
                     try
                     {
-                        // 防御：重解析点（junction/symlink）绝不删除，避免误删链接目标。
+                        
                         if (DiskUtils.IsReparsePoint(dir))
                             continue;
                         Directory.Delete(dir);
@@ -4524,7 +5504,7 @@ namespace DiskCleaner.ViewModels
                 {
                     EmptyFolderList.Clear();
                     EmptyFolderReportText = $"已删除 {deleted} 个空文件夹。";
-                    EmptyFolderStatusText = $"删除了 {deleted} 个空文件夹";
+                    EmptyFolderStatusText = "";
                     StatusText = "空文件夹清理完成";
                 });
             });

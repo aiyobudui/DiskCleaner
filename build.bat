@@ -1,16 +1,16 @@
 @echo off
 setlocal enabledelayedexpansion
 
-title DiskCleaner ç¼–è¯‘è„šæœ¬
+title DiskCleaner ±àÒë½Å±¾
 
 REM ============================================================
-REM  DiskCleaner ç¼–è¯‘è„šæœ¬
-REM  æ¡†æž¶: .NET 8.0 WPF (net8.0-windows)
-REM  è¾“å‡º: ä¾èµ–æ¡†æž¶å•æ–‡ä»¶ï¼ˆFramework-Dependent Single Fileï¼‰
-REM  è¯´æ˜Ž: éœ€è¦ç›®æ ‡æœºå™¨å·²å®‰è£… .NET 8 Desktop Runtime
+REM  DiskCleaner ±àÒë½Å±¾
+REM  ¿ò¼Ü: .NET 8.0 WPF (net8.0-windows)
+REM  Êä³ö: ÒÀÀµ¿ò¼Üµ¥ÎÄ¼þ£¨Framework-Dependent Single File£©
+REM  ËµÃ÷: ÐèÒªÄ¿±ê»úÆ÷ÒÑ°²×° .NET 8 Desktop Runtime
 REM ============================================================
 
-REM ---- å˜é‡é…ç½® ----
+REM ---- ±äÁ¿ÅäÖÃ ----
 set "PROJECT_ROOT=%~dp0"
 set "PROJECT_NAME=DiskCleaner"
 set "CSPROJ=%PROJECT_ROOT%%PROJECT_NAME%.csproj"
@@ -23,81 +23,81 @@ cd /d "%PROJECT_ROOT%"
 
 echo.
 echo ============================================================
-echo   %PROJECT_NAME% ç¼–è¯‘è„šæœ¬
-echo   æ¡†æž¶: .NET 8.0 WPF
-echo   æ¨¡å¼: ä¾èµ–æ¡†æž¶å•æ–‡ä»¶
+echo   %PROJECT_NAME% ±àÒë½Å±¾
+echo   ¿ò¼Ü: .NET 8.0 WPF
+echo   Ä£Ê½: ÒÀÀµ¿ò¼Üµ¥ÎÄ¼þ
 echo ============================================================
 echo.
 
-REM ---- æ£€æŸ¥ dotnet SDK ----
-echo [1/6] æ£€æŸ¥ .NET SDK çŽ¯å¢ƒ...
+REM ---- ¼ì²é dotnet SDK ----
+echo [1/6] ¼ì²é .NET SDK »·¾³...
 dotnet --version >nul 2>&1
 if errorlevel 1 (
     echo.
-    echo [é”™è¯¯] æœªæ‰¾åˆ° dotnet å‘½ä»¤ï¼
-    echo        è¯·å®‰è£… .NET 8 SDK: https://dotnet.microsoft.com/download/dotnet/8.0
+    echo [´íÎó] Î´ÕÒµ½ dotnet ÃüÁî£¡
+    echo        Çë°²×° .NET 8 SDK: https://dotnet.microsoft.com/download/dotnet/8.0
     echo.
     pause
     exit /b 1
 )
 for /f "tokens=*" %%v in ('dotnet --version') do set "DOTNET_VER=%%v"
-echo       .NET SDK ç‰ˆæœ¬: %DOTNET_VER%
+echo       .NET SDK °æ±¾: %DOTNET_VER%
 echo       OK
 echo.
 
-REM ---- ç¼–è¯‘å‰æ¸…ç†ä¸´æ—¶æ–‡ä»¶ ----
-echo [2/6] ç¼–è¯‘å‰æ¸…ç†ä¸´æ—¶æ–‡ä»¶...
+REM ---- ±àÒëÇ°ÇåÀíÁÙÊ±ÎÄ¼þ ----
+echo [2/6] ±àÒëÇ°ÇåÀíÁÙÊ±ÎÄ¼þ...
 set "CLEAN_COUNT=0"
 
 if exist "%PROJECT_ROOT%bin" (
-    echo       åˆ é™¤ bin\
+    echo       É¾³ý bin\
     rmdir /s /q "%PROJECT_ROOT%bin" 2>nul
     set /a CLEAN_COUNT+=1
 )
 if exist "%PROJECT_ROOT%obj" (
-    echo       åˆ é™¤ obj\
+    echo       É¾³ý obj\
     rmdir /s /q "%PROJECT_ROOT%obj" 2>nul
     set /a CLEAN_COUNT+=1
 )
 if exist "%PROJECT_ROOT%.vs" (
-    echo       åˆ é™¤ .vs\
+    echo       É¾³ý .vs\
     rmdir /s /q "%PROJECT_ROOT%.vs" 2>nul
     set /a CLEAN_COUNT+=1
 )
-REM æ¸…ç†æ—¥å¿—æ–‡ä»¶
+REM ÇåÀíÈÕÖ¾ÎÄ¼þ
 if exist "%PROJECT_ROOT%%PROJECT_NAME%.log" (
     del /q "%PROJECT_ROOT%%PROJECT_NAME%.log" 2>nul
-    echo       åˆ é™¤ %PROJECT_NAME%.log
+    echo       É¾³ý %PROJECT_NAME%.log
     set /a CLEAN_COUNT+=1
 )
-REM æ¸…ç† VS ä¸´æ—¶æ–‡ä»¶
+REM ÇåÀí VS ÁÙÊ±ÎÄ¼þ
 if exist "%PROJECT_ROOT%\TestResults" (
     rmdir /s /q "%PROJECT_ROOT%\TestResults" 2>nul
-    echo       åˆ é™¤ TestResults\
+    echo       É¾³ý TestResults\
     set /a CLEAN_COUNT+=1
 )
-echo       å·²æ¸…ç† !CLEAN_COUNT! é¡¹ä¸´æ—¶ç›®å½•/æ–‡ä»¶
+echo       ÒÑÇåÀí !CLEAN_COUNT! ÏîÁÙÊ±Ä¿Â¼/ÎÄ¼þ
 echo       OK
 echo.
 
-REM ---- è¿˜åŽŸ NuGet åŒ… ----
-echo [3/6] è¿˜åŽŸ NuGet ä¾èµ–åŒ…...
+REM ---- »¹Ô­ NuGet °ü ----
+echo [3/6] »¹Ô­ NuGet ÒÀÀµ°ü...
 dotnet restore "%CSPROJ%"
 if errorlevel 1 (
     echo.
-    echo [é”™è¯¯] NuGet åŒ…è¿˜åŽŸå¤±è´¥ï¼
+    echo [´íÎó] NuGet °ü»¹Ô­Ê§°Ü£¡
     pause
     exit /b 1
 )
 echo       OK
 echo.
 
-REM ---- ç¼–è¯‘å‘å¸ƒï¼ˆä¾èµ–æ¡†æž¶å•æ–‡ä»¶ï¼‰----
-echo [4/6] ç¼–è¯‘å‘å¸ƒï¼ˆä¾èµ–æ¡†æž¶å•æ–‡ä»¶ï¼‰...
-echo       é…ç½®: %CONFIG%
-echo       è¿è¡Œæ—¶: %RUNTIME%
-echo       å•æ–‡ä»¶: æ˜¯
-echo       è‡ªåŒ…å«: å¦ï¼ˆä¾èµ–æ¡†æž¶ï¼‰
+REM ---- ±àÒë·¢²¼£¨ÒÀÀµ¿ò¼Üµ¥ÎÄ¼þ£©----
+echo [4/6] ±àÒë·¢²¼£¨ÒÀÀµ¿ò¼Üµ¥ÎÄ¼þ£©...
+echo       ÅäÖÃ: %CONFIG%
+echo       ÔËÐÐÊ±: %RUNTIME%
+echo       µ¥ÎÄ¼þ: ÊÇ
+echo       ×Ô°üº¬: ·ñ£¨ÒÀÀµ¿ò¼Ü£©
 echo.
 dotnet publish "%CSPROJ%" ^
     -c %CONFIG% ^
@@ -110,7 +110,7 @@ dotnet publish "%CSPROJ%" ^
     -o "%PUBLISH_DIR%"
 if errorlevel 1 (
     echo.
-    echo [é”™è¯¯] ç¼–è¯‘å¤±è´¥ï¼è¯·æ£€æŸ¥ä¸Šæ–¹é”™è¯¯ä¿¡æ¯ã€‚
+    echo [´íÎó] ±àÒëÊ§°Ü£¡Çë¼ì²éÉÏ·½´íÎóÐÅÏ¢¡£
     pause
     exit /b 1
 )
@@ -118,90 +118,90 @@ echo.
 echo       OK
 echo.
 
-REM ---- è§£æžå®žé™…è¾“å‡º EXEï¼ˆAssemblyName å¯èƒ½å«ä¸­æ–‡ï¼Œä¸ç¡¬ç¼–ç æ–‡ä»¶åï¼‰----
+REM ---- ½âÎöÊµ¼ÊÊä³ö EXE£¨AssemblyName ¿ÉÄÜº¬ÖÐÎÄ£¬²»Ó²±àÂëÎÄ¼þÃû£©----
 set "OUTPUT_EXE="
 for %%E in ("%PUBLISH_DIR%\*.exe") do (
     if not defined OUTPUT_EXE set "OUTPUT_EXE=%%E"
 )
 
-REM ---- ç¼–è¯‘åŽæ¸…ç†ä¸´æ—¶æ–‡ä»¶ ----
-echo [5/6] ç¼–è¯‘åŽæ¸…ç†ä¸´æ—¶æ–‡ä»¶...
+REM ---- ±àÒëºóÇåÀíÁÙÊ±ÎÄ¼þ ----
+echo [5/6] ±àÒëºóÇåÀíÁÙÊ±ÎÄ¼þ...
 set "POST_CLEAN=0"
 
 if exist "%PROJECT_ROOT%obj" (
     rmdir /s /q "%PROJECT_ROOT%obj" 2>nul
-    echo       åˆ é™¤ obj\
+    echo       É¾³ý obj\
     set /a POST_CLEAN+=1
 )
-REM åˆ é™¤ publish ä¸­é—´ç›®å½• bin\Releaseï¼ˆä»…ä¿ç•™ -o bin ä¸‹çš„å•æ–‡ä»¶ exeï¼‰
+REM É¾³ý publish ÖÐ¼äÄ¿Â¼ bin\Release£¨½ö±£Áô -o bin ÏÂµÄµ¥ÎÄ¼þ exe£©
 if exist "%PROJECT_ROOT%bin\Release" (
     rmdir /s /q "%PROJECT_ROOT%bin\Release" 2>nul
-    echo       åˆ é™¤ bin\Release ä¸­é—´ç›®å½•
+    echo       É¾³ý bin\Release ÖÐ¼äÄ¿Â¼
     set /a POST_CLEAN+=1
 )
-REM æ¸…ç† publish ç›®å½•ä¸­å¤šä½™çš„æ–‡ä»¶ï¼ˆä»…ä¿ç•™ exe å’Œ dllï¼‰
+REM ÇåÀí publish Ä¿Â¼ÖÐ¶àÓàµÄÎÄ¼þ£¨½ö±£Áô exe ºÍ dll£©
 if exist "%PUBLISH_DIR%\*.pdb" (
     del /q "%PUBLISH_DIR%\*.pdb" 2>nul
-    echo       åˆ é™¤ publish\*.pdb
+    echo       É¾³ý publish\*.pdb
     set /a POST_CLEAN+=1
 )
 if exist "%PUBLISH_DIR%\*.xml" (
     del /q "%PUBLISH_DIR%\*.xml" 2>nul
-    echo       åˆ é™¤ publish\*.xml
+    echo       É¾³ý publish\*.xml
     set /a POST_CLEAN+=1
 )
 if exist "%PUBLISH_DIR%\*.json" (
     del /q "%PUBLISH_DIR%\*.json" 2>nul
-    echo       åˆ é™¤ publish\*.json
+    echo       É¾³ý publish\*.json
     set /a POST_CLEAN+=1
 )
-echo       å·²æ¸…ç† !POST_CLEAN! é¡¹ä¸´æ—¶æ–‡ä»¶
+echo       ÒÑÇåÀí !POST_CLEAN! ÏîÁÙÊ±ÎÄ¼þ
 echo       OK
 echo.
 
-REM ---- å¯é€‰æ•°å­—ç­¾åï¼ˆæ¶ˆé™¤å®‰å…¨è½¯ä»¶å¯¹æœªçŸ¥ç­¾å EXE çš„å®‰è£…æ‹¦æˆª/è¯¯æŠ¥ï¼‰----
-echo [5.5/6] å¯é€‰æ•°å­—ç­¾åï¼ˆæ¶ˆé™¤å®‰å…¨è½¯ä»¶è¯¯æŠ¥ï¼‰...
+REM ---- ¿ÉÑ¡Êý×ÖÇ©Ãû£¨Ïû³ý°²È«Èí¼þ¶ÔÎ´ÖªÇ©Ãû EXE µÄ°²×°À¹½Ø/Îó±¨£©----
+echo [5.5/6] ¿ÉÑ¡Êý×ÖÇ©Ãû£¨Ïû³ý°²È«Èí¼þÎó±¨£©...
 if not defined SIGN_CERT_FILE (
-    echo   æœªé…ç½®ç­¾åè¯ä¹¦ï¼Œè·³è¿‡ç­¾åã€‚
-    echo   è¯´æ˜Ž: å‘å¸ƒå‰è®¾ç½® SIGN_CERT_FILE ä¸Ž SIGN_CERT_PASSWORD çŽ¯å¢ƒå˜é‡ï¼Œå¯å¯ç”¨ä»£ç ç­¾åã€‚
-    echo         ç­¾ååŽå¯æ¶ˆé™¤å®‰å…¨è½¯ä»¶å¯¹æœªçŸ¥ç­¾åç¨‹åºçš„å®‰è£…æ‹¦æˆªä¸Žè¯¯æŠ¥ã€‚
-    echo   OKï¼ˆè·³è¿‡ï¼‰
+    echo   Î´ÅäÖÃÇ©ÃûÖ¤Êé£¬Ìø¹ýÇ©Ãû¡£
+    echo   ËµÃ÷: ·¢²¼Ç°ÉèÖÃ SIGN_CERT_FILE Óë SIGN_CERT_PASSWORD »·¾³±äÁ¿£¬¿ÉÆôÓÃ´úÂëÇ©Ãû¡£
+    echo         Ç©Ãûºó¿ÉÏû³ý°²È«Èí¼þ¶ÔÎ´ÖªÇ©Ãû³ÌÐòµÄ°²×°À¹½ØÓëÎó±¨¡£
+    echo   OK£¨Ìø¹ý£©
 ) else (
     set "SIGNTOOL="
     if exist "%ProgramFiles(x86)%\Windows Kits\10\bin\x64\signtool.exe" set "SIGNTOOL=%ProgramFiles(x86)%\Windows Kits\10\bin\x64\signtool.exe"
     if exist "%ProgramFiles%\Windows Kits\10\bin\x64\signtool.exe" set "SIGNTOOL=%ProgramFiles%\Windows Kits\10\bin\x64\signtool.exe"
     if not defined SIGNTOOL (
-        echo   [è­¦å‘Š] æœªæ‰¾åˆ° signtool.exeï¼ˆéœ€å®‰è£… Windows SDKï¼‰ï¼Œè·³è¿‡ç­¾åã€‚
-        echo   OKï¼ˆè·³è¿‡ï¼‰
+        echo   [¾¯¸æ] Î´ÕÒµ½ signtool.exe£¨Ðè°²×° Windows SDK£©£¬Ìø¹ýÇ©Ãû¡£
+        echo   OK£¨Ìø¹ý£©
     ) else (
         "%SIGNTOOL%" sign /f "%SIGN_CERT_FILE%" /p "%SIGN_CERT_PASSWORD%" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "%OUTPUT_EXE%"
         if errorlevel 1 (
-            echo   [è­¦å‘Š] ç­¾åå¤±è´¥ï¼è¯·æ£€æŸ¥è¯ä¹¦è·¯å¾„ä¸Žå¯†ç ã€‚æœªç­¾åä»å¯è¿è¡Œï¼Œä½†å¯èƒ½è§¦å‘å®‰å…¨è½¯ä»¶æ‹¦æˆªã€‚
+            echo   [¾¯¸æ] Ç©ÃûÊ§°Ü£¡Çë¼ì²éÖ¤ÊéÂ·¾¶ÓëÃÜÂë¡£Î´Ç©ÃûÈÔ¿ÉÔËÐÐ£¬µ«¿ÉÄÜ´¥·¢°²È«Èí¼þÀ¹½Ø¡£
         ) else (
-            echo   å·²ç”¨ä»£ç ç­¾åè¯ä¹¦ç­¾å: %OUTPUT_EXE%
+            echo   ÒÑÓÃ´úÂëÇ©ÃûÖ¤ÊéÇ©Ãû: %OUTPUT_EXE%
         )
     )
 )
 echo.
 
-REM ---- ç¼–è¯‘ç»“æžœæŠ¥å‘Š ----
-echo [6/6] ç¼–è¯‘ç»“æžœ
+REM ---- ±àÒë½á¹û±¨¸æ ----
+echo [6/6] ±àÒë½á¹û
 echo ============================================================
 if exist "%OUTPUT_EXE%" (
     for %%A in ("%OUTPUT_EXE%") do set "FILE_SIZE=%%~zA"
     set /a "FILE_MB=!FILE_SIZE! / 1048576"
     set /a "FILE_KB=!FILE_SIZE! / 1024"
-    echo   ç¼–è¯‘æˆåŠŸï¼
+    echo   ±àÒë³É¹¦£¡
     echo.
-    echo   è¾“å‡ºæ–‡ä»¶: %OUTPUT_EXE%
-    echo   æ–‡ä»¶å¤§å°: !FILE_MB! MB ^(!FILE_KB! KB^)
+    echo   Êä³öÎÄ¼þ: %OUTPUT_EXE%
+    echo   ÎÄ¼þ´óÐ¡: !FILE_MB! MB ^(!FILE_KB! KB^)
     echo.
-    echo   è¿è¡Œè¦æ±‚: ç›®æ ‡æœºå™¨éœ€å®‰è£… .NET 8 Desktop Runtime
-    echo   ä¸‹è½½åœ°å€: https://dotnet.microsoft.com/download/dotnet/8.0
+    echo   ÔËÐÐÒªÇó: Ä¿±ê»úÆ÷Ðè°²×° .NET 8 Desktop Runtime
+    echo   ÏÂÔØµØÖ·: https://dotnet.microsoft.com/download/dotnet/8.0
     echo.
-    echo   æç¤º: å¯ç›´æŽ¥å¤åˆ¶ .exe åˆ°ç›®æ ‡æœºå™¨è¿è¡Œ
+    echo   ÌáÊ¾: ¿ÉÖ±½Ó¸´ÖÆ .exe µ½Ä¿±ê»úÆ÷ÔËÐÐ
 ) else (
-    echo   [è­¦å‘Š] æœªæ‰¾åˆ°è¾“å‡ºæ–‡ä»¶ï¼Œè¯·æ£€æŸ¥ç¼–è¯‘æ˜¯å¦æˆåŠŸã€‚
+    echo   [¾¯¸æ] Î´ÕÒµ½Êä³öÎÄ¼þ£¬Çë¼ì²é±àÒëÊÇ·ñ³É¹¦¡£
 )
 echo ============================================================
 echo.

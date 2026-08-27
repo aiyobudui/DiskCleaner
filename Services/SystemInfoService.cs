@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Management;
 using System.Runtime.InteropServices;
@@ -11,47 +11,47 @@ namespace DiskCleaner.Services
 {
     public interface ISystemInfoService
     {
-        /// <summary>收集本机系统/CPU/内存/显卡信息（同步，可能耗时 ~300ms，调用方应置于后台线程）。</summary>
+        
         SystemInfo Get();
     }
 
-    /// <summary>
-    /// 收集本机系统信息，并统一格式化为「高端监控软件」风格的清爽展示文本：
-    /// - 系统版本：注册表 ProductName 本地化为中文 + 版本号后置灰化
-    /// - CPU：去除 (R)/(TM) 商标符号与 "CPU @ x.xxGHz" 后缀，副文本显示核心/线程/最大频率
-    /// - 内存：极简规格 + 品牌中文映射（去除条数与料号）
-    /// - 显卡：清理名称、为纯 Radeon 补 "AMD" 前缀、核显标注 "(核显)"
-    /// </summary>
+    
+    
+    
+    
+    
+    
+    
     public class SystemInfoService : ISystemInfoService
     {
-        /// <summary>过滤虚拟/远程显示驱动，避免把向日葵/RDP/VNC等虚拟卡显示为真实显卡。</summary>
+        
         private static bool IsVirtualGpuName(string name)
         {
             if (string.IsNullOrWhiteSpace(name)) return true;
             var n = name.ToLowerInvariant();
-            return n.Contains("oray") ||                // 向日葵 OraylddDriver
-                   n.Contains("sunlogin") ||           // 向日葵旧名
-                   n.Contains("todesk") ||             // ToDesk 虚拟驱动
-                   n.Contains("rdp") ||                // 远程桌面 RDPUDD/RDPDD
-                   n.Contains("basicdisplay") ||       // Microsoft Basic Display Driver
-                   n.Contains("microsoft basic") ||    // Microsoft Basic Display Driver 别名
-                   n.Contains("mirage") ||             // 镜像驱动
-                   n.Contains("logmein") ||            // LogMeIn 镜像驱动
-                   n.Contains("vnc") ||                // VNC 远程显示
+            return n.Contains("oray") ||                
+                   n.Contains("sunlogin") ||           
+                   n.Contains("todesk") ||             
+                   n.Contains("rdp") ||                
+                   n.Contains("basicdisplay") ||       
+                   n.Contains("microsoft basic") ||    
+                   n.Contains("mirage") ||             
+                   n.Contains("logmein") ||            
+                   n.Contains("vnc") ||                
                    n.Contains("tightvnc") ||
-                   n.Contains("anydesk") ||            // AnyDesk 虚拟显示
-                   n.Contains("teamviewer") ||         // TeamViewer 虚拟显示
-                   n.Contains("chrome remote") ||      // Chrome 远程桌面
-                   n.Contains("parsec") ||             // Parsec 虚拟显示
-                   n.Contains("virtual display") ||    // 通用虚拟显示
-                   n.Contains("usb display");          // USB 外接显卡/显示适配器
+                   n.Contains("anydesk") ||            
+                   n.Contains("teamviewer") ||         
+                   n.Contains("chrome remote") ||      
+                   n.Contains("parsec") ||             
+                   n.Contains("virtual display") ||    
+                   n.Contains("usb display");          
         }
 
-        /// <summary>
-        /// 在后台线程运行 WMI 查询并加超时兜底。WMI 在进程冷启动时可能很慢（需初始化 WmiPrvSE 提供程序），
-        /// 超时后返回 fallback，避免把“系统信息”卡片卡在慢速查询上。
-        /// 注意：超时后原 WMI 查询仍在后台线程跑完即被丢弃，不会无限挂起调用方。
-        /// </summary>
+        
+        
+        
+        
+        
         private static T RunWmiWithTimeout<T>(Func<T> work, int milliseconds, T fallback)
         {
             try
@@ -78,17 +78,17 @@ namespace DiskCleaner.Services
 
             try
             {
-                // WMI 查询在进程冷启动时可能很慢（带动 WmiPrvSE 初始化），加超时兜底，
-                // 超时则用回退值（逻辑线程数），避免“CPU 详情”卡住整张卡片。
+                
+                
                 var cpu = RunWmiWithTimeout(GetCpuInfo, 1500,
                     (Cores: Environment.ProcessorCount, Threads: Environment.ProcessorCount, MaxClockMHz: 0));
                 info.CpuDetail = BuildCpuDetail(cpu.Cores, cpu.Threads, cpu.MaxClockMHz);
             }
-            catch { /* 核心/线程/频率是附加信息，读取失败时保持空 */ }
+            catch {   }
 
             try
             {
-                // 内存规格同样走 WMI（Win32_PhysicalMemory），加超时；超时回退到仅显示总容量。
+                
                 var mem = RunWmiWithTimeout(GetMemoryModel, 1500, FallbackMemory());
                 info.MemoryModel = mem.Model;
                 info.MemoryDetail = mem.Detail;
@@ -101,7 +101,7 @@ namespace DiskCleaner.Services
             return info;
         }
 
-        // ── 系统版本（注册表）→ 主名 + 副文本 ──
+        
         private static (string Name, string Detail) GetSystemVersion()
         {
             using var key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
@@ -110,12 +110,12 @@ namespace DiskCleaner.Services
 
             var ver = key?.GetValue("DisplayVersion")?.ToString()?.Trim();
             if (string.IsNullOrWhiteSpace(ver))
-                ver = key?.GetValue("ReleaseId")?.ToString()?.Trim(); // Win10 旧版使用 ReleaseId
+                ver = key?.GetValue("ReleaseId")?.ToString()?.Trim(); 
 
             var build = key?.GetValue("CurrentBuild")?.ToString()?.Trim();
-            var ubr = key?.GetValue("UBR")?.ToString()?.Trim();       // 修订号
+            var ubr = key?.GetValue("UBR")?.ToString()?.Trim();       
 
-            // Windows 11 兼容：注册表 ProductName 仍可能写 Windows 10，按 Build >= 22000 修正
+            
             if (product.Contains("Windows 10", StringComparison.OrdinalIgnoreCase) &&
                 int.TryParse(build, out int buildNum) && buildNum >= 22000)
             {
@@ -133,12 +133,12 @@ namespace DiskCleaner.Services
             return (name, detail);
         }
 
-        /// <summary>将英文 Windows SKU 名称翻译为更亲切的中文显示名。</summary>
+        
         private static string TranslateProductName(string product)
         {
             if (string.IsNullOrWhiteSpace(product)) return "Windows";
 
-            // 精确命中优先（覆盖绝大多数常见 SKU）
+            
             var exact = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
                 ["Windows 11 Pro for Workstations"] = "Windows 11 专业工作站版",
@@ -156,7 +156,7 @@ namespace DiskCleaner.Services
             };
             if (exact.TryGetValue(product, out var zh)) return zh;
 
-            // 兜底：基于 Windows 11 / 10 做英文 token 替换（注意顺序：先替换长词）
+            
             if (product.IndexOf("Windows 11", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 product.IndexOf("Windows 10", StringComparison.OrdinalIgnoreCase) >= 0)
             {
@@ -166,14 +166,14 @@ namespace DiskCleaner.Services
                 s = Regex.Replace(s, @"\bHome\b", "家庭版", RegexOptions.IgnoreCase);
                 s = Regex.Replace(s, @"\bEnterprise\b", "企业版", RegexOptions.IgnoreCase);
                 s = Regex.Replace(s, @"\bEducation\b", "教育版", RegexOptions.IgnoreCase);
-                s = Regex.Replace(s, @"\s+N\b", "", RegexOptions.IgnoreCase); // 去掉 "N" 后缀
+                s = Regex.Replace(s, @"\s+N\b", "", RegexOptions.IgnoreCase); 
                 return s.Trim();
             }
 
             return product;
         }
 
-        // ── CPU 名称（注册表，去商标符与频率后缀）──
+        
         private static string GetCpuModel()
         {
             using var key = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
@@ -185,17 +185,17 @@ namespace DiskCleaner.Services
         private static string CleanCpuName(string cpu)
         {
             if (string.IsNullOrWhiteSpace(cpu)) return cpu;
-            // 去除商标符号 (R) (TM) (C) (M) 等
+            
             cpu = Regex.Replace(cpu, @"\((?:R|TM|C|M)\)", "", RegexOptions.IgnoreCase);
-            // 去除末尾 " CPU @ 3.80GHz" / " CPU @ 3.80 GHz"
+            
             cpu = Regex.Replace(cpu, @"\s*CPU\s*@\s*[\d.]+\s*(GHz|MHz)", "", RegexOptions.IgnoreCase);
-            // AMD 等末尾 " Processor" 后缀
+            
             cpu = Regex.Replace(cpu, @"\s*Processor\s*$", "", RegexOptions.IgnoreCase);
             while (cpu.Contains("  ")) cpu = cpu.Replace("  ", " ");
             return cpu.Trim();
         }
 
-        // ── CPU 核心/线程/最大频率（WMI）──
+        
         private static (int Cores, int Threads, int MaxClockMHz) GetCpuInfo()
         {
             int cores = 0, threads = 0, maxClock = 0;
@@ -208,20 +208,20 @@ namespace DiskCleaner.Services
                 if (obj["NumberOfLogicalProcessors"] is uint t) threads += (int)t;
                 if (obj["MaxClockSpeed"] is uint m) maxClock = Math.Max(maxClock, (int)m);
 
-                // 部分机器（虚拟机/个别机型）WMI 不返回 MaxClockSpeed(=0)，
-                // 降级用 CurrentClockSpeed 兜底，避免频率被静默丢弃。
+                
+                
                 if (maxClock == 0)
                 {
                     if (obj["CurrentClockSpeed"] is uint cur) maxClock = (int)cur;
                 }
             }
-            // WMI 失败时回退到 Environment.ProcessorCount（逻辑线程数）
+            
             if (threads == 0) threads = Environment.ProcessorCount;
             if (cores == 0) cores = threads;
             return (cores, threads, maxClock);
         }
 
-        /// <summary>组合 CPU 副文本：(核心线程 / 最大频率)</summary>
+        
         private static string BuildCpuDetail(int cores, int threads, int maxClockMHz)
         {
             var parts = new List<string>();
@@ -234,7 +234,7 @@ namespace DiskCleaner.Services
             return parts.Count > 0 ? "(" + string.Join(" / ", parts) + ")" : "";
         }
 
-        // ── 显卡（注册表显示适配器 Class 键，失败用 WMI fallback）──
+        
         private static string GetGpuModel()
         {
             var lines = new List<string>();
@@ -244,7 +244,7 @@ namespace DiskCleaner.Services
             {
                 foreach (var sub in cls.GetSubKeyNames())
                 {
-                    // 适配器子键为纯数字（0000, 0001...）；跳过 "Properties" 等非数字子键
+                    
                     if (sub.Length == 0 || !char.IsDigit(sub[0])) continue;
                     using var subKey = cls.OpenSubKey(sub);
                     var desc = subKey?.GetValue("DriverDesc")?.ToString()
@@ -257,7 +257,7 @@ namespace DiskCleaner.Services
             }
             if (lines.Count > 0) return string.Join("\n", lines);
 
-            // fallback：WMI Win32_VideoController
+            
             try
             {
                 using var searcher = new ManagementObjectSearcher(
@@ -280,7 +280,7 @@ namespace DiskCleaner.Services
             return "未知显卡";
         }
 
-        /// <summary>清理单张显卡名称，并按「核显/独显」决定副文本。</summary>
+        
         private static string FormatGpuLine(string rawName, ulong memBytes)
         {
             var name = CleanGpuName(rawName);
@@ -293,10 +293,10 @@ namespace DiskCleaner.Services
         private static string CleanGpuName(string name)
         {
             if (string.IsNullOrWhiteSpace(name)) return name;
-            name = Regex.Replace(name, @"\((?:R|TM|C|M)\)", "", RegexOptions.IgnoreCase); // 去商标符
-            name = Regex.Replace(name, @"\s*Series\s*$", "", RegexOptions.IgnoreCase); // 去 " Series" 后缀
+            name = Regex.Replace(name, @"\((?:R|TM|C|M)\)", "", RegexOptions.IgnoreCase); 
+            name = Regex.Replace(name, @"\s*Series\s*$", "", RegexOptions.IgnoreCase); 
             name = name.Trim();
-            // 纯 "Radeon ..."（非 AMD/NVIDIA/Intel 前缀）补 "AMD" 前缀
+            
             if (name.StartsWith("Radeon", StringComparison.OrdinalIgnoreCase) &&
                 !name.StartsWith("AMD", StringComparison.OrdinalIgnoreCase) &&
                 name.IndexOf("Intel", StringComparison.OrdinalIgnoreCase) < 0 &&
@@ -308,15 +308,15 @@ namespace DiskCleaner.Services
             return name.Trim();
         }
 
-        /// <summary>判断是否为核显（用于标注 "(核显)" 而非显存）。</summary>
+        
         private static bool IsIntegratedGpu(string name)
         {
             var n = name.ToLowerInvariant();
-            // Intel 核显：UHD/HD/Iris。注意不要把 Intel Arc 独显（A/B 系列）误判为核显。
+            
             if (n.Contains("intel") &&
                 (n.Contains("uhd graphics") || n.Contains("hd graphics") || n.Contains("iris")))
                 return true;
-            // AMD APU 核显（含 "graphics" 但非独立 RX/R9/R7 等）
+            
             if (n.Contains("radeon") && n.Contains("graphics") &&
                 !n.Contains("rx ") && !n.Contains("radeon r") && !n.Contains("radeon hd"))
                 return true;
@@ -342,7 +342,7 @@ namespace DiskCleaner.Services
             return mb >= 1 ? mb.ToString("F0") + "MB" : "";
         }
 
-        // ── 内存型号/类型/频率（WMI，失败回退总量）──
+        
         private static (string Model, string Detail) GetMemoryModel()
         {
             try
@@ -363,7 +363,7 @@ namespace DiskCleaner.Services
                     var cap = mo["Capacity"];
                     if (cap != null && ulong.TryParse(cap.ToString(), out var c)) totalBytes += c;
 
-                    // 优先用实际配置频率 ConfiguredClockSpeed，回退 Speed
+                    
                     var csp = mo["ConfiguredClockSpeed"];
                     if (csp != null && uint.TryParse(csp.ToString(), out var cs) && cs > 0) speed = Math.Max(speed, cs);
                     var sp = mo["Speed"];
@@ -388,7 +388,7 @@ namespace DiskCleaner.Services
                 if (!string.IsNullOrWhiteSpace(typeName)) model += " " + typeName;
                 if (speed > 0) model += " " + speed + "MHz";
 
-                // 副文本：品牌中文映射（去除无人懂的料号）
+                
                 var detail = "";
                 var brand = MapMemoryBrand(manufacturer);
                 if (!string.IsNullOrWhiteSpace(brand)) detail = "[" + brand + "]";
@@ -401,7 +401,7 @@ namespace DiskCleaner.Services
             }
         }
 
-        /// <summary>将厂商英文名映射为简洁中文品牌名（未命中的短名保留，过长取首词）。</summary>
+        
         private static string MapMemoryBrand(string manufacturer)
         {
             if (string.IsNullOrWhiteSpace(manufacturer) ||
@@ -434,11 +434,11 @@ namespace DiskCleaner.Services
                 ["Ramaxel"] = "记忆科技",
             };
             if (map.TryGetValue(manufacturer, out var zh)) return zh;
-            // 未命中：短名称（如 "Kingston"）直接保留，过长取首词避免堆砌型号
+            
             return manufacturer.Length <= 16 ? manufacturer : manufacturer.Split(' ')[0];
         }
 
-        /// <summary>将 SMBIOS 内存类型枚举映射为 DDR 名（未识别返回空）。</summary>
+        
         private static string MapMemoryType(uint t) => t switch
         {
             20 or 21 or 22 => "DDR2",
@@ -450,7 +450,7 @@ namespace DiskCleaner.Services
             _ => ""
         };
 
-        /// <summary>WMI 不可用时的回退：仅显示总容量（GlobalMemoryStatusEx）。</summary>
+        
         private static (string Model, string Detail) FallbackMemory()
         {
             try
