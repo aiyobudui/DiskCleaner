@@ -118,6 +118,12 @@ echo.
 echo       OK
 echo.
 
+REM ---- 解析实际输出 EXE（AssemblyName 可能含中文，不硬编码文件名）----
+set "OUTPUT_EXE="
+for %%E in ("%PUBLISH_DIR%\*.exe") do (
+    if not defined OUTPUT_EXE set "OUTPUT_EXE=%%E"
+)
+
 REM ---- 编译后清理临时文件 ----
 echo [5/6] 编译后清理临时文件...
 set "POST_CLEAN=0"
@@ -157,8 +163,8 @@ REM ---- 可选数字签名（消除安全软件对未知签名 EXE 的安装拦
 echo [5.5/6] 可选数字签名（消除安全软件误报）...
 if not defined SIGN_CERT_FILE (
     echo   未配置签名证书，跳过签名。
-    echo   说明: 设置环境变量 SIGN_CERT_FILE（指向 .pfx）与 SIGN_CERT_PASSWORD 后重新发布，
-    echo         可获取受信任代码签名，消除安全软件对“未知签名”程序的安装拦截与误报。
+    echo   说明: 发布前设置 SIGN_CERT_FILE 与 SIGN_CERT_PASSWORD 环境变量，可启用代码签名。
+    echo         签名后可消除安全软件对未知签名程序的安装拦截与误报。
     echo   OK（跳过）
 ) else (
     set "SIGNTOOL="
@@ -170,7 +176,7 @@ if not defined SIGN_CERT_FILE (
     ) else (
         "%SIGNTOOL%" sign /f "%SIGN_CERT_FILE%" /p "%SIGN_CERT_PASSWORD%" /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "%OUTPUT_EXE%"
         if errorlevel 1 (
-            echo   [警告] 签名失败！请检查证书路径与密码（未签名仍可运行，但可能触发安全软件拦截）。
+            echo   [警告] 签名失败！请检查证书路径与密码。未签名仍可运行，但可能触发安全软件拦截。
         ) else (
             echo   已用代码签名证书签名: %OUTPUT_EXE%
         )
