@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <StartupObject>DiskCleaner.App</StartupObject>
+    <AssemblyName>九歌・系统清洁小工具</AssemblyName>
+    <AssemblyTitle>九歌・系统清洁小工具</AssemblyTitle>
+    <AssemblyDescription>系统清理增强版 - 智能清理、空间分析、系统监控</AssemblyDescription>
+    <NeutralLanguage>zh-CN</NeutralLanguage>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <NoWarn>CA1416;NU1701</NoWarn>
+    <Company>WinClaw</Company>
+    <Product>九歌・系统清洁小工具</Product>
+    <Version>0.9.0</Version>
+    <!-- 版本号统一调用：$(Version) 是唯一真相源，下面两个通过 MSBuild 变量自动同步。
+         代码通过 Assembly.GetExecutingAssembly().GetName().Version 读取 AssemblyVersion；
+         XAML 通过 Binding 到 VersionSuffix 属性显示版本。改版本号只需改 <Version> 一处。 -->
+    <AssemblyVersion>$(Version).0</AssemblyVersion>
+    <FileVersion>$(Version).0</FileVersion>
+    <!-- 以管理员身份运行（所有清理/优化操作需系统权限）。
+         注意：必须用属性(Property)形式声明，SDK 才读取 $(ApplicationManifest)；
+         用 <ApplicationManifest Include=.../> 的 Item 形式会被忽略，回退为默认 asInvoker。 -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- 桌面 exe 图标；运行时窗口/任务栏不显示（见各 Window 的 Icon="{x:Null}"） -->
+    <ApplicationIcon>DiskCleaner.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- 系统信息收集：WMI（Win32_PhysicalMemory）获取内存型号/类型/频率。
+       net8.0 项目回退到缓存的 7.0.2 net7.0 资产（NU1701），运行时通过 roll-forward 兼容。 -->
+  <ItemGroup>
+    <PackageReference Include="System.Management" Version="7.0.2"/>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0"/>
+  </ItemGroup>
+
+  <!-- Compile + XAML items declared explicitly (default ** globs are disabled in Directory.Build.props).
+       MSBuild's ** recursion is broken for this WPF SDK in this environment, so use per-directory * globs. -->
+  <ItemGroup>
+    <Compile Include="*.cs" />
+    <Compile Include="Converters/*.cs" />
+    <Compile Include="Interop/*.cs" />
+    <Compile Include="Models/*.cs" />
+    <Compile Include="Services/*.cs" />
+    <Compile Include="ViewModels/*.cs" />
+    <Compile Include="Views/*.cs" />
+    <ApplicationDefinition Include="App.xaml" />
+    <Page Include="Views/MainWindow.xaml" />
+    <Page Include="Views/SettingsWindow.xaml" />
+  </ItemGroup>
+
+</Project>

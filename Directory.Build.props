@@ -1,0 +1,13 @@
+<Project>
+  <!-- The .NET 10 WindowsDesktop SDK evaluates its default "**/*.cs" / "**/*.xaml" item
+       globs relative to the SDK targets directory (not the project), so they resolve to
+       literal "**/*.cs" / "**/*.xaml" items and break the build on a clean compile.
+       Disable the SDK default item globs and declare Compile / XAML items explicitly
+       (project-rooted globs DO expand correctly, as verified). -->
+  <PropertyGroup>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+  </PropertyGroup>
+</Project>

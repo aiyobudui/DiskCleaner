@@ -1,0 +1,31 @@
+<Window x:Class="DiskCleaner.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="九歌・系统清洁小工具 设置" Height="500" Width="450"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource bg-primary}" Foreground="{DynamicResource text-primary}">
+    <Window.Resources>
+        <SolidColorBrush x:Key="bg-tertiary" Color="#45475A"/>
+        <SolidColorBrush x:Key="text-primary" Color="#CDD6F4"/>
+        <SolidColorBrush x:Key="accent-green" Color="#A6E3A1"/>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,15">
+            <TextBlock Text="通用设置" FontWeight="Bold" FontSize="16" Margin="0,0,0,15" Foreground="{StaticResource text-primary}"/>
+
+            <CheckBox Content="高级模式" IsChecked="{Binding IsAdvancedMode}" Foreground="{DynamicResource text-primary}" Margin="0,8" FontSize="13"/>
+            <CheckBox Content="极速清理（安全级缓存直接删除，不进回收站）" IsChecked="{Binding IsFastClean}" Foreground="{DynamicResource text-primary}" Margin="0,8" FontSize="13" ToolTip="勾选后，Safe 级缓存（浏览器缓存、临时文件等）直接删除，速度更快；Caution 级仍进回收站。"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="保存" Width="80" Height="32" Margin="0,0,10,0" Background="{DynamicResource accent-green}" Foreground="{DynamicResource text-on-accent}" FontWeight="SemiBold" BorderThickness="0" Click="Save_Click"/>
+            <Button Content="取消" Width="80" Height="32" Background="{DynamicResource bg-tertiary}" Foreground="{DynamicResource text-primary}" BorderThickness="0" Click="Cancel_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
