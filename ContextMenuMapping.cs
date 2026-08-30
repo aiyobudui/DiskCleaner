@@ -292,6 +292,53 @@ namespace DiskCleaner
         
         
         
+        // 已知合法的第三方 Shell 扩展 CLSID（压缩 / 云盘 / PDF / 工具类等）。
+        // 这些扩展即便其 InprocServer32 路径因 MSIX 打包、ACL 保护或路径解析差异而无法被
+        // IsDeadFileReference 直接校验，也绝不应被“失效清理”误删，否则会破坏其右键菜单
+        // （典型如 Bandizip 通过 MSIX 打包的 Shell 扩展提供 Win11 一级右键菜单）。
+        // 数据来源：自动从下方 _displayNameFallback 中提取「CLSID 形态、且不属于 _clsidResText 系统项」的键值，
+        // 与“已知第三方扩展”清单保持一致，新增同类工具无需手动维护。
+        private static readonly HashSet<string> ProtectedShellExtensionClsids = new(StringComparer.OrdinalIgnoreCase);
+
+        static ContextMenuMapping()
+        {
+            foreach (var kv in _displayNameFallback)
+            {
+                var k = NormalizeClsid(kv.Key);
+                if (k == null) continue;                       // 仅保留 CLSID 形态键值（过滤 ProgID / 扩展名等）
+                if (_clsidResText.ContainsKey(kv.Key)) continue; // 跳过纯系统项（shell32.dll 等资源引用）
+                ProtectedShellExtensionClsids.Add(k);
+            }
+        }
+
+        // 受保护的名称片段（大小写不敏感）。用于兜底：当处理器/菜单项的名称包含这些片段时，
+        // 即便其 CLSID 尚未登记到 ProtectedShellExtensionClsids，也视为合法扩展而不删除。
+        // 覆盖用户明确反馈会被误删的火绒安全、系统记事本、Windows Terminal，以及常见压缩/云盘/PDF 工具。
+        private static readonly HashSet<string> _protectedNameFragments = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "bandizip", "7-zip", "winrar", "2345", "快压", "好压", "百度网盘", "腾讯微云", "dropbox", "googledrive",
+            "火绒", "huorong", "hips", "notepad", "windowsnotepad", "windows terminal", "wt.exe", "adobe", "foxit"
+        };
+
+        /// <summary>
+        /// 判断某个上下文菜单处理器 / COM 组件是否为已知合法的第三方 Shell 扩展（受保护，不应被失效清理删除）。
+        /// </summary>
+        public static bool IsProtectedShellExtension(string guid, string keyName)
+        {
+            var g = NormalizeClsid(guid);
+            if (!string.IsNullOrWhiteSpace(g) && ProtectedShellExtensionClsids.Contains(g)) return true;
+            var k = NormalizeClsid(keyName);
+            if (!string.IsNullOrWhiteSpace(k) && ProtectedShellExtensionClsids.Contains(k)) return true;
+
+            if (!string.IsNullOrWhiteSpace(keyName))
+            {
+                var n = keyName.ToLowerInvariant();
+                foreach (var frag in _protectedNameFragments)
+                    if (n.Contains(frag)) return true;
+            }
+            return false;
+        }
+
         private static readonly Regex _accelRegex = new Regex(@"\s*\(&[A-Za-z0-9]\)\s*", RegexOptions.Compiled);
 
         
@@ -958,9 +1005,44 @@ namespace DiskCleaner
         
         
         
+        // 记事本（含 Windows 11 商店版 Notepad）按“普通应用”处理，不作为系统项隐藏。
+        // 依据：其实现文件位于非 Windows 目录（如 C:\Program Files\WindowsApps\...\Notepad\），
+        // 与系统内置组件不同，应始终在右键管理中显示。
+        private static bool IsNotepadApp(string keyName, string guid)
+        {
+            if (ContainsToken(keyName, "notepad", "记事本", "windowsnotepad")) return true;
+            if (ContainsToken(guid, "notepad", "记事本", "windowsnotepad")) return true;
+
+            var g = NormalizeClsid(guid);
+            if (g != null)
+            {
+                var server = GetClsidServerFile(g);
+                if (ContainsToken(server, "notepad", "windowsnotepad")) return true;
+                try
+                {
+                    using var clsidKey = OpenClsidKey(g);
+                    var loc = clsidKey?.GetValue("LocalizedString") as string;
+                    if (ContainsToken(loc, "notepad", "记事本", "windowsnotepad")) return true;
+                }
+                catch { }
+            }
+            return false;
+        }
+
+        private static bool ContainsToken(string s, params string[] tokens)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            var lower = s.ToLowerInvariant();
+            foreach (var t in tokens)
+                if (!string.IsNullOrWhiteSpace(t) && lower.Contains(t.ToLowerInvariant()))
+                    return true;
+            return false;
+        }
+
         public static bool IsSystemContextMenuItem(string keyName, string guid)
         {
-            
+            if (IsNotepadApp(keyName, guid)) return false; // 记事本：按普通应用显示，不隐藏
+
             if (!string.IsNullOrWhiteSpace(keyName) && BuiltInSystemVerbs.Contains(keyName)) return true;
 
             

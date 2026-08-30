@@ -313,7 +313,13 @@ namespace DiskCleaner.ViewModels
 
         
         private static void SortByName(List<ContextMenuItem> list)
-            => list.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase));
+            => list.Sort((a, b) =>
+            {
+                // Win11 一级菜单优先排在前面
+                int cmp = b.IsWin11TopLevel.CompareTo(a.IsWin11TopLevel);
+                if (cmp != 0) return cmp;
+                return string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase);
+            });
 
         
         

@@ -287,7 +287,7 @@ namespace DiskCleaner.ViewModels
 
             var registryCleanGroup = new CleanGroup("注册表清理");
             var invalidStartupItem = MakeCleanItem("invalid_startup", "无效启动项",
-                "清理“开机启动”里指向已卸载程序的残留项，覆盖三处：① 注册表 Run/RunOnce（exe 已不存在）；② 启动文件夹（shell:startup / shell:common startup 中指向已删除程序的 .lnk 快捷方式，删除即移入回收站）；③ 任务计划程序（动作命令指向已删除 exe 的计划任务，删除前自动备份 XML）。仅删除失效的启动项，不影响任何仍有效的启动项。",
+                "清理“开机启动”里指向已卸载程序的残留项，覆盖三处：① 注册表 Run/RunOnce（exe 已不存在）；② 启动文件夹（shell:startup / shell:common startup 中指向已删除程序的 .lnk 快捷方式，直接删除）；③ 任务计划程序（动作命令指向已删除 exe 的计划任务，删除前自动备份 XML）。仅删除失效的启动项，不影响任何仍有效的启动项。",
                 RiskLevel.Safe, CleanInvalidStartup);
             var invalidComItem = MakeCleanItem("invalid_com", "失效 COM/ActiveX 组件",
                 "清理类标识符（CLSID）中服务器文件（DLL/EXE）已被删除的失效组件。仅当服务器文件经校验确实不存在时才删除该 CLSID，不触碰仍在使用的组件。",
@@ -875,8 +875,8 @@ namespace DiskCleaner.ViewModels
             
             
             
-            var r1 = CleanService.DeleteDirContents(winTemp, _logger, false, null);
-            var r2 = CleanService.DeleteDirContents(Path.GetTempPath(), _logger, false, null);
+            var r1 = CleanService.DeleteDirContents(winTemp, _logger, null);
+            var r2 = CleanService.DeleteDirContents(Path.GetTempPath(), _logger, null);
             return Aggregate(r1, r2);
         }
 
@@ -2095,13 +2095,16 @@ namespace DiskCleaner.ViewModels
             
             if (NativeMethods.FileExistsResilient(exe)) return false;
 
+            // 重解析点（如 App 执行别名 wt.exe）本身存在即视为存活，不删除
+            if (DiskUtils.IsReparsePoint(exe)) return false;
+
             
             string alt = null;
             if (exe.IndexOf("System32", StringComparison.OrdinalIgnoreCase) >= 0)
                 alt = ReplaceIgnoreCase(exe, "System32", "SysWOW64");
             else if (exe.IndexOf("SysWOW64", StringComparison.OrdinalIgnoreCase) >= 0)
                 alt = ReplaceIgnoreCase(exe, "SysWOW64", "System32");
-            if (alt != null && File.Exists(alt)) return false;
+            if (alt != null && NativeMethods.FileExistsResilient(alt)) return false;
             return true;
         }
 
@@ -3053,7 +3056,7 @@ namespace DiskCleaner.ViewModels
                 {
                     var path = ExtractMuiCachePath(name);
                     if (string.IsNullOrWhiteSpace(path)) continue;
-                    try { if (!File.Exists(path)) count++; } catch { }
+                    try { if (!NativeMethods.FileExistsResilient(path)) count++; } catch { }
                 }
             }
             return count;
@@ -3074,7 +3077,7 @@ namespace DiskCleaner.ViewModels
                     if (string.IsNullOrWhiteSpace(path)) continue;
                     try
                     {
-                        if (!File.Exists(path))
+                        if (!NativeMethods.FileExistsResilient(path))
                         {
                             key.DeleteValue(name, false);
                             cleaned++;
@@ -3626,12 +3629,15 @@ namespace DiskCleaner.ViewModels
                             
                             
                             bool dead = !string.IsNullOrWhiteSpace(target)
-                                        && !File.Exists(target)
+                                        && !NativeMethods.FileExistsResilient(target)
                                         && !Directory.Exists(target);
                             if (dead)
                             {
-                                NativeMethods.SendToRecycleBin(lnk);
-                                _logger?.Info($"已清理启动文件夹失效项(回收站): {lnk} -> {target}");
+                                var la = File.GetAttributes(lnk);
+                                if ((la & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
+                                    File.SetAttributes(lnk, la & ~FileAttributes.ReadOnly);
+                                File.Delete(lnk);
+                                _logger?.Info($"已清理启动文件夹失效项: {lnk} -> {target}");
                             }
                         }
                         catch (Exception ex) { _logger?.Error($"清理启动文件夹项失败: {lnk}", ex); }
@@ -3773,6 +3779,8 @@ namespace DiskCleaner.ViewModels
                         {
                             using var sub = clsidKey.OpenSubKey(guid, false);
                             if (sub == null) continue;
+
+                            if (ContextMenuMapping.IsProtectedShellExtension(guid, null)) continue;
 
                             
                             
@@ -3920,6 +3928,7 @@ namespace DiskCleaner.ViewModels
                                         
                                         
                                         if (ContextMenuMapping.IsWin11TopLevelExtension(guid, handler)) continue;
+                                        if (ContextMenuMapping.IsProtectedShellExtension(guid, handler)) continue;
 
                                         
                                         
@@ -4025,6 +4034,7 @@ namespace DiskCleaner.ViewModels
                                 if (string.IsNullOrWhiteSpace(guid)) continue;
                                 if (ContextMenuMapping.IsSystemContextMenuItem(handler, guid)) continue;
                                 if (ContextMenuMapping.IsWin11TopLevelExtension(guid, handler)) continue;
+                                if (ContextMenuMapping.IsProtectedShellExtension(guid, handler)) continue;
                                 bool anyServer = false;
                                 bool allDead = true;
                                 foreach (var root in _clsidRoots)
@@ -4111,7 +4121,7 @@ namespace DiskCleaner.ViewModels
                             
                             
                             bool dead = !string.IsNullOrWhiteSpace(target)
-                                        && !File.Exists(target)
+                                        && !NativeMethods.FileExistsResilient(target)
                                         && !Directory.Exists(target);
                             if (dead) count++;
                         }
@@ -4150,6 +4160,8 @@ namespace DiskCleaner.ViewModels
                         {
                             using var sub = clsidKey.OpenSubKey(guid, false);
                             if (sub == null) continue;
+
+                            if (ContextMenuMapping.IsProtectedShellExtension(guid, null)) continue;
 
                             bool anyServer = false;
                             bool allDead = true;

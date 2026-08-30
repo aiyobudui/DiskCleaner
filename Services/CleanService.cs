@@ -21,9 +21,6 @@ namespace DiskCleaner.Services
         
         
         
-        public static bool UseRecycleBin { get; set; } = false;
-
-        
         public readonly struct CleanResult
         {
             public int FilesSucceeded { get; init; }
@@ -101,13 +98,13 @@ namespace DiskCleaner.Services
         
         
         
-        public static CleanResult DeleteDirContents(string path, ILogger logger, bool useRecycleBin, IProgress<string> progress)
+        public static CleanResult DeleteDirContents(string path, ILogger logger, IProgress<string> progress)
         {
             if (!Directory.Exists(path)) return default;
             var result = new CleanResult();
             try
             {
-                DeleteDirContentsInternal(path, useRecycleBin, logger, progress, ref result);
+                DeleteDirContentsInternal(path, logger, progress, ref result);
             }
             catch (Exception ex)
             {
@@ -122,75 +119,19 @@ namespace DiskCleaner.Services
         
         
         
-        private static void DeleteDirContentsInternal(string path, bool useRecycleBin, ILogger logger, IProgress<string> progress, ref CleanResult result)
+        private static void DeleteDirContentsInternal(string path, ILogger logger, IProgress<string> progress, ref CleanResult result)
         {
             if (!Directory.Exists(path)) return;
 
             var allFiles = new List<FileEntry>();
             CollectFilesRecursively(path, allFiles, logger);
 
-            if (useRecycleBin)
+            foreach (var entry in allFiles)
             {
-                
-                
-                const int batchSize = 500;
-                for (int i = 0; i < allFiles.Count; i += batchSize)
-                {
-                    var batch = allFiles.GetRange(i, Math.Min(batchSize, allFiles.Count - i));
-                    foreach (var entry in batch)
-                        progress?.Report(entry.Path);
-
-                    
-                    
-                    try
-                    {
-                        
-                        
-                        bool batchOk = NativeMethods.SendToRecycleBin(batch.Select(e => e.Path), 50);
-                        if (!batchOk)
-                        {
-                            
-                            
-                            
-                            
-                            var remaining = batch.Where(e => File.Exists(e.Path)).ToList();
-                            if (remaining.Count > 0)
-                                NativeMethods.SendToRecycleBin(remaining.Select(e => e.Path), 50);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        logger?.Error($"批量删除文件失败 (batch {i / batchSize + 1})", ex);
-                    }
-
-                    
-                    
-                    foreach (var entry in batch)
-                    {
-                        if (!File.Exists(entry.Path))
-                        {
-                            result = result with
-                            {
-                                FilesSucceeded = result.FilesSucceeded + 1,
-                                BytesFreed = result.BytesFreed + entry.Length
-                            };
-                        }
-                        else
-                        {
-                            TryDeleteFile(entry.Path, useRecycleBin, logger, progress, ref result);
-                        }
-                    }
-                }
-            }
-            else
-            {
-                foreach (var entry in allFiles)
-                {
-                    TryDeleteFile(entry.Path, useRecycleBin, logger, progress, ref result);
-                }
+                TryDeleteFile(entry.Path, logger, progress, ref result);
             }
 
-            DeleteEmptySubdirectories(path, useRecycleBin, logger, progress, ref result);
+            DeleteEmptySubdirectories(path, logger, progress, ref result);
         }
 
         
@@ -198,15 +139,14 @@ namespace DiskCleaner.Services
         
         
         
-        private static void TryDeleteFile(string file, bool useRecycleBin, ILogger logger, IProgress<string> progress, ref CleanResult result)
+        private static void TryDeleteFile(string file, ILogger logger, IProgress<string> progress, ref CleanResult result)
         {
             if (!File.Exists(file)) return;
 
             long fileSize = 0;
             try { fileSize = new FileInfo(file).Length; } catch { }
 
-            
-            if (TrySendToRecycleBinOrDelete(file, useRecycleBin, logger))
+            if (TryDeleteFileDirect(file, logger))
             {
                 progress?.Report(file);
                 result = result with { FilesSucceeded = result.FilesSucceeded + 1, BytesFreed = result.BytesFreed + fileSize };
@@ -234,36 +174,36 @@ namespace DiskCleaner.Services
         }
 
         
-        private static bool TrySendToRecycleBinOrDelete(string file, bool useRecycleBin, ILogger logger)
+        private static bool TryDeleteFileDirect(string file, ILogger logger)
         {
             try
             {
                 if (!File.Exists(file)) return true;
-                if (useRecycleBin)
-                {
-                    if (NativeMethods.SendToRecycleBin(file))
-                        return true;
-                    
-                    var attr = File.GetAttributes(file);
-                    if ((attr & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
-                        File.SetAttributes(file, attr & ~FileAttributes.ReadOnly);
-                    File.Delete(file);
-                    return true;
-                }
-                else
-                {
-                    var attr = File.GetAttributes(file);
-                    if ((attr & FileAttributes.System) == FileAttributes.System) return false;
-                    if ((attr & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
-                        File.SetAttributes(file, attr & ~FileAttributes.ReadOnly);
-                    File.Delete(file);
-                    return true;
-                }
+                if (DiskUtils.IsReparsePoint(file)) return true;      // 重解析点（App 执行别名 wt.exe、符号链接、junction 等）一律不删
+                if (IsWindowsAppsPath(file)) return true;            // 不删除 WindowsApps 内的打包应用文件
+                var attr = File.GetAttributes(file);
+                if ((attr & FileAttributes.System) == FileAttributes.System) return false;
+                if ((attr & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
+                    File.SetAttributes(file, attr & ~FileAttributes.ReadOnly);
+                File.Delete(file);
+                return true;
             }
             catch
             {
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 判断路径是否位于打包应用目录 WindowsApps 内（含 C:\Program Files\WindowsApps 与
+        /// %LOCALAPPDATA%\Microsoft\WindowsApps）。这些路径由系统/应用商店管理，清理工具不应触碰，
+        /// 否则会破坏 Windows Terminal 等 AppX 应用的执行别名与注册。
+        /// </summary>
+        private static bool IsWindowsAppsPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return false;
+            var p = path.Replace('/', '\\').ToLowerInvariant();
+            return p.Contains(@"\windowsapps\");
         }
 
         
@@ -279,6 +219,8 @@ namespace DiskCleaner.Services
         {
             try
             {
+                if (DiskUtils.IsReparsePoint(file)) return false;   // 重解析点不截断
+                if (IsWindowsAppsPath(file)) return false;
                 var attr = File.GetAttributes(file);
                 if ((attr & FileAttributes.System) == FileAttributes.System) return false;
                 if ((attr & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
@@ -305,6 +247,8 @@ namespace DiskCleaner.Services
         {
             try
             {
+                if (DiskUtils.IsReparsePoint(file)) return false;   // 重解析点不安排重启删除
+                if (IsWindowsAppsPath(file)) return false;
                 var attr = File.GetAttributes(file);
                 if ((attr & FileAttributes.System) == FileAttributes.System) return false;
                 if (File.Exists(file) && NativeMethods.ScheduleDeleteOnReboot(file))
@@ -366,7 +310,7 @@ namespace DiskCleaner.Services
         
         
         
-        private static void DeleteEmptySubdirectories(string path, bool useRecycleBin, ILogger logger, IProgress<string> progress, ref CleanResult result)
+        private static void DeleteEmptySubdirectories(string path, ILogger logger, IProgress<string> progress, ref CleanResult result)
         {
             
             var emptyOpts = new EnumerationOptions
@@ -378,26 +322,18 @@ namespace DiskCleaner.Services
             foreach (var dirInfo in new DirectoryInfo(path).EnumerateDirectories("*", emptyOpts))
             {
                 var dir = dirInfo.FullName;
-                DeleteEmptySubdirectories(dir, useRecycleBin, logger, progress, ref result);
+                DeleteEmptySubdirectories(dir, logger, progress, ref result);
                 try
                 {
                     if (!Directory.Exists(dir)) continue;
                     if (Directory.GetFileSystemEntries(dir, "*", SearchOption.TopDirectoryOnly).Length > 0) continue;
 
                     progress?.Report(dir);
-                    if (useRecycleBin)
-                    {
-                        if (!NativeMethods.SendToRecycleBin(dir))
-                            Directory.Delete(dir);
-                    }
-                    else
-                    {
-                        var attr = File.GetAttributes(dir);
-                        if ((attr & FileAttributes.System) == FileAttributes.System) continue;
-                        if ((attr & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
-                            File.SetAttributes(dir, attr & ~FileAttributes.ReadOnly);
-                        Directory.Delete(dir);
-                    }
+                    var attr = File.GetAttributes(dir);
+                    if ((attr & FileAttributes.System) == FileAttributes.System) continue;
+                    if ((attr & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
+                        File.SetAttributes(dir, attr & ~FileAttributes.ReadOnly);
+                    Directory.Delete(dir);
                 }
                 catch (Exception ex)
                 {
@@ -411,7 +347,7 @@ namespace DiskCleaner.Services
         
         
         public static CleanResult DeleteDirContents(string path, ILogger logger)
-            => DeleteDirContents(path, logger, UseRecycleBin, null);
+            => DeleteDirContents(path, logger, null);
 
 
         // 清理 Windows 日志目录（C:\Windows\Logs）。
@@ -427,7 +363,7 @@ namespace DiskCleaner.Services
             if (IsWindowsUpdateInProgress(out var updateReason))
             {
                 logger?.Warning($"检测到系统当前正在更新（{updateReason}），为安全起见跳过停止更新相关服务，仅做 best-effort 清理（部分日志文件可能仍被锁定）。");
-                return DeleteDirContents(logsPath, logger, UseRecycleBin, progress);
+                return DeleteDirContents(logsPath, logger, progress);
             }
 
             // 仅处理这些服务；每项记录停止前的运行状态，便于清理后精确恢复。
@@ -473,7 +409,7 @@ namespace DiskCleaner.Services
             CleanResult result;
             try
             {
-                result = DeleteDirContents(logsPath, logger, UseRecycleBin, progress);
+                result = DeleteDirContents(logsPath, logger, progress);
             }
             finally
             {
@@ -596,24 +532,12 @@ namespace DiskCleaner.Services
         
         
         
-        public static void DeleteDir(string path, ILogger logger, bool useRecycleBin, IProgress<string> progress)
+        public static void DeleteDir(string path, ILogger logger, IProgress<string> progress)
         {
             if (!Directory.Exists(path)) return;
             try
             {
-                if (useRecycleBin)
-                {
-                    progress?.Report(path);
-                    if (!NativeMethods.SendToRecycleBin(path))
-                    {
-                        
-                        DeleteDirContents(path, logger, false, progress);
-                        RemoveReparsePointChildren(path, logger);
-                        DeleteEmptyRoot(path, logger);
-                    }
-                    return;
-                }
-                DeleteDirContents(path, logger, false, progress);
+                DeleteDirContents(path, logger, progress);
                 RemoveReparsePointChildren(path, logger);
                 DeleteEmptyRoot(path, logger);
             }
@@ -644,12 +568,12 @@ namespace DiskCleaner.Services
         
         
         public static void DeleteDir(string path, ILogger logger)
-            => DeleteDir(path, logger, UseRecycleBin, null);
+            => DeleteDir(path, logger, null);
 
         
         
         
-        public static void DeleteFile(string path, ILogger logger, bool useRecycleBin, IProgress<string> progress)
+        public static void DeleteFile(string path, ILogger logger, IProgress<string> progress)
         {
             if (!File.Exists(path)) return;
             try
@@ -659,15 +583,7 @@ namespace DiskCleaner.Services
                 if ((attr & FileAttributes.System) == FileAttributes.System) return;
                 if ((attr & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
                     File.SetAttributes(path, attr & ~FileAttributes.ReadOnly);
-                if (useRecycleBin)
-                {
-                    if (!NativeMethods.SendToRecycleBin(path))
-                        File.Delete(path);
-                }
-                else
-                {
-                    File.Delete(path);
-                }
+                File.Delete(path);
             }
             catch (Exception ex)
             {
@@ -682,7 +598,7 @@ namespace DiskCleaner.Services
 
         
         public static void DeleteFile(string path, ILogger logger)
-            => DeleteFile(path, logger, UseRecycleBin, null);
+            => DeleteFile(path, logger, null);
 
         
         

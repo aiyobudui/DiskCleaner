@@ -223,92 +223,9 @@ namespace DiskCleaner.Interop
         
         
 
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
-        public struct SHFILEOPSTRUCT
-        {
-            public IntPtr hwnd;
-            public uint wFunc;
-            public string pFrom;
-            public string pTo;
-            public ushort fFlags;
-            public int fAnyOperationsAborted;  
-            public IntPtr hNameMappings;
-            public string lpszProgressTitle;
-        }
 
-        public const uint FO_DELETE = 0x0003;
-
-        public const ushort FOF_ALLOWUNDO = 0x0040;       
-        public const ushort FOF_NOCONFIRMATION = 0x0010;   
-        public const ushort FOF_SILENT = 0x0004;           
-        public const ushort FOF_NOERRORUI = 0x0400;         
 
         
-        [DllImport("shell32.dll", CharSet = CharSet.Auto)]
-        public static extern int SHFileOperation(ref SHFILEOPSTRUCT lpFileOp);
-
-        
-        
-        
-        public static bool SendToRecycleBin(string path)
-        {
-            
-            
-            bool ok = false;
-            bool completed = StaShellExecutor.Run(() =>
-            {
-                var shf = new SHFILEOPSTRUCT
-                {
-                    wFunc = FO_DELETE,
-                    pFrom = path + '\0' + '\0',  
-                    fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI
-                };
-                ok = SHFileOperation(ref shf) == 0;
-            });
-            return completed && ok;
-        }
-
-        
-        
-        
-        
-        
-        public static bool SendToRecycleBin(IEnumerable<string> paths, int batchSize = 50)
-        {
-            if (paths == null) return false;
-            var list = new List<string>(paths);
-            if (list.Count == 0) return true;
-
-            const ushort flags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
-            bool allOk = true;
-            
-            bool completed = StaShellExecutor.Run(() =>
-            {
-                for (int i = 0; i < list.Count; i += batchSize)
-                {
-                    var batch = list.GetRange(i, Math.Min(batchSize, list.Count - i));
-                    var sb = new System.Text.StringBuilder();
-                    foreach (var p in batch)
-                    {
-                        sb.Append(p);
-                        sb.Append('\0');
-                    }
-                    sb.Append('\0'); 
-
-                    var shf = new SHFILEOPSTRUCT
-                    {
-                        wFunc = FO_DELETE,
-                        pFrom = sb.ToString(),
-                        fFlags = flags
-                    };
-                    int hr = SHFileOperation(ref shf);
-                    if (hr != 0 || shf.fAnyOperationsAborted != 0)
-                        allOk = false;
-                }
-            }, timeoutMs: 60000); 
-
-            return completed && allOk;
-        }
 
         
         
@@ -497,8 +414,8 @@ namespace DiskCleaner.Interop
             catch { disabled = false; }
             try
             {
-                if (File.Exists(path)) return true;
-                if (!Path.HasExtension(path) && File.Exists(path + ".exe")) return true;
+                if (PathExistsResilient(path)) return true;
+                if (!Path.HasExtension(path) && PathExistsResilient(path + ".exe")) return true;
             }
             finally
             {
@@ -508,6 +425,29 @@ namespace DiskCleaner.Interop
                 }
             }
             return false;
+        }
+
+        /// <summary>
+        /// ACL 感知的文件存在性判定。与安全软件/系统打包应用（如火绒、Windows 记事本、Windows Terminal）
+        /// 的关键 DLL 通常被 ACL 保护，普通进程 <see cref="File.Exists"/> 会抛出 UnauthorizedAccessException
+        /// 并被吞掉返回 false，导致"失效清理"误判其为不存在而删除。此处将「存在但拒绝访问」也视为「存活」，
+        /// 避免误删受保护扩展；真正不存在的文件仍返回 false（FileNotFoundException 等），不影响垃圾判定。
+        /// </summary>
+        private static bool PathExistsResilient(string path)
+        {
+            try
+            {
+                File.GetAttributes(path);
+                return true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return true; // 存在但被 ACL 保护 —— 视为存活
+            }
+            catch
+            {
+                return false; // 不存在或路径非法 —— 视为失效
+            }
         }
 
         

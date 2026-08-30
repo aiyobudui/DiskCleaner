@@ -1941,24 +1941,45 @@
                             </StackPanel>
                             <TextBlock Text="面向 Windows 10 / 11 的轻量系统清理与优化工具，采用 WPF + MVVM 架构，全部调用 Windows 原生 API（零 WMI 依赖），启动快、体积小。" FontSize="12" Foreground="{DynamicResource text-secondary}" TextWrapping="Wrap" Margin="0,0,0,12"/>
 
-                            <!-- 菜单说明 -->
-                            <TextBlock Text="菜单说明" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource text-primary}" Margin="0,0,0,8"/>
-                            <StackPanel>
-                                <TextBlock FontSize="12" Foreground="{DynamicResource text-secondary}" TextWrapping="Wrap" Margin="0,0,0,6">
-                                    <Run Text="仪表盘" FontWeight="Bold" Foreground="{DynamicResource text-primary}"/><Run Text="：系统信息、性能监控（CPU / 内存 / GPU 实时占用，可一键释放内存）、磁盘空间概览。"/>
-                                </TextBlock>
-                                <TextBlock FontSize="12" Foreground="{DynamicResource text-secondary}" TextWrapping="Wrap" Margin="0,0,0,6">
-                                    <Run Text="深度清理" FontWeight="Bold" Foreground="{DynamicResource text-primary}"/><Run Text="：垃圾清理（50+ 项，安全 / 谨慎分级）、极限清理（关闭休眠、系统修复、DISM 组件清理等系统工具）、空文件夹扫描。"/>
-                                </TextBlock>
-                                <TextBlock FontSize="12" Foreground="{DynamicResource text-secondary}" TextWrapping="Wrap" Margin="0,0,0,6">
-                                    <Run Text="系统设置" FontWeight="Bold" Foreground="{DynamicResource text-primary}"/><Run Text="：UAC / SmartScreen、任务栏与开始菜单、桌面图标、文件资源管理器、记事本、用户文件夹迁移、HOSTS 文件。"/>
-                                </TextBlock>
-                                <TextBlock FontSize="12" Foreground="{DynamicResource text-secondary}" TextWrapping="Wrap" Margin="0,0,0,6">
-                                    <Run Text="右键管理" FontWeight="Bold" Foreground="{DynamicResource text-primary}"/><Run Text="：文件右键、桌面右键、右键新建菜单的禁用 / 启用 / 删除。"/>
-                                </TextBlock>
-                            </StackPanel>
+                            <!-- 清理项 -->
+                            <TextBlock Text="清理项" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource text-primary}" Margin="0,0,0,8"/>
+                            <WrapPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                <Border Background="{DynamicResource bg-tertiary}" BorderBrush="{DynamicResource border-color}" BorderThickness="1" CornerRadius="10" Padding="10,4" Margin="0,0,6,6">
+                                    <TextBlock Text="系统缓存" FontSize="12" Foreground="{DynamicResource text-secondary}"/>
+                                </Border>
+                                <Border Background="{DynamicResource bg-tertiary}" BorderBrush="{DynamicResource border-color}" BorderThickness="1" CornerRadius="10" Padding="10,4" Margin="0,0,6,6">
+                                    <TextBlock Text="应用缓存" FontSize="12" Foreground="{DynamicResource text-secondary}"/>
+                                </Border>
+                                <Border Background="{DynamicResource bg-tertiary}" BorderBrush="{DynamicResource border-color}" BorderThickness="1" CornerRadius="10" Padding="10,4" Margin="0,0,6,6">
+                                    <TextBlock Text="日志" FontSize="12" Foreground="{DynamicResource text-secondary}"/>
+                                </Border>
+                                <Border Background="{DynamicResource bg-tertiary}" BorderBrush="{DynamicResource border-color}" BorderThickness="1" CornerRadius="10" Padding="10,4" Margin="0,0,6,6">
+                                    <TextBlock Text="使用痕迹" FontSize="12" Foreground="{DynamicResource text-secondary}"/>
+                                </Border>
+                                <Border Background="{DynamicResource bg-tertiary}" BorderBrush="{DynamicResource border-color}" BorderThickness="1" CornerRadius="10" Padding="10,4" Margin="0,0,6,6">
+                                    <TextBlock Text="注册表清理" FontSize="12" Foreground="{DynamicResource text-secondary}"/>
+                                </Border>
+                                <Border Background="{DynamicResource bg-tertiary}" BorderBrush="{DynamicResource border-color}" BorderThickness="1" CornerRadius="10" Padding="10,4" Margin="0,0,6,6">
+                                    <TextBlock Text="极限清理" FontSize="12" Foreground="{DynamicResource text-secondary}"/>
+                                </Border>
+                                <Border Background="{DynamicResource bg-tertiary}" BorderBrush="{DynamicResource border-color}" BorderThickness="1" CornerRadius="10" Padding="10,4" Margin="0,0,6,6">
+                                    <TextBlock Text="空文件夹" FontSize="12" Foreground="{DynamicResource text-secondary}"/>
+                                </Border>
+                                <Border Background="{DynamicResource bg-tertiary}" BorderBrush="{DynamicResource border-color}" BorderThickness="1" CornerRadius="10" Padding="10,4" Margin="0,0,6,6">
+                                    <TextBlock Text="空间分析" FontSize="12" Foreground="{DynamicResource text-secondary}"/>
+                                </Border>
+                                <Border Background="{DynamicResource bg-tertiary}" BorderBrush="{DynamicResource border-color}" BorderThickness="1" CornerRadius="10" Padding="10,4" Margin="0,0,6,6">
+                                    <TextBlock Text="右键菜单" FontSize="12" Foreground="{DynamicResource text-secondary}"/>
+                                </Border>
+                                <Border Background="{DynamicResource bg-tertiary}" BorderBrush="{DynamicResource border-color}" BorderThickness="1" CornerRadius="10" Padding="10,4" Margin="0,0,6,6">
+                                    <TextBlock Text="系统设置" FontSize="12" Foreground="{DynamicResource text-secondary}"/>
+                                </Border>
+                                <Border Background="{DynamicResource bg-tertiary}" BorderBrush="{DynamicResource border-color}" BorderThickness="1" CornerRadius="10" Padding="10,4" Margin="0,0,6,6">
+                                    <TextBlock Text="清空回收站" FontSize="12" Foreground="{DynamicResource text-secondary}"/>
+                                </Border>
+                            </WrapPanel>
 
-                            <TextBlock Text="提示：垃圾清理默认直接删除（不进回收站），谨慎级项目需二次确认；清理、删除、搬迁等操作具有一定风险，请谨慎使用。" FontSize="11" Foreground="{DynamicResource text-muted}" TextWrapping="Wrap" Margin="0,12,0,0"/>
+                            <TextBlock Text="所有清理项直接删除（不进回收站，无安全模式），谨慎级项目需二次确认；清理、删除、搬迁等操作具有一定风险，请谨慎使用。" FontSize="11" Foreground="{DynamicResource text-muted}" TextWrapping="Wrap" Margin="0,0,0,0"/>
 
                             <!-- 分割线 -->
                             <Border Height="1" Background="{DynamicResource text-muted}" Opacity="0.2" Margin="0,14"/>

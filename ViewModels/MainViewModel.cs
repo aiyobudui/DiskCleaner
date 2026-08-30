@@ -220,9 +220,6 @@ namespace DiskCleaner.ViewModels
 
             IsLightTheme = string.Equals(_config.Theme, "light", StringComparison.OrdinalIgnoreCase);
             ThemeIcon = IsLightTheme ? "☀️" : "🌙";
-
-            
-            CleanService.UseRecycleBin = false;
         }
 
         protected async Task SaveConfigAsync()
