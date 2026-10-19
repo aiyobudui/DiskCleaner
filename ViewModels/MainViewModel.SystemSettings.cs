@@ -376,7 +376,7 @@ namespace DiskCleaner.ViewModels
                         var restarted = _tweakService.SetNotepadOpenInNewTab(value);
                         StatusText = restarted
                             ? (value ? "记事本已设置为在新选项卡中打开文件，已重启记事本使设置生效。" : "记事本已设置为在新窗口中打开文件，已重启记事本使设置生效。")
-                            : (value ? "记事本已设置为在新选项卡中打开文件，下次打开记事本时生效。" : "记事本已设置为在新窗口中打开文件，下次打开记事本时生效。");
+                            : (value ? "记事本已设置为在新选项卡中打开文件，将在下次打开记事本时生效；若记事本正在运行，请先保存并关闭后再重新打开。" : "记事本已设置为在新窗口中打开文件，将在下次打开记事本时生效；若记事本正在运行，请先保存并关闭后再重新打开。");
                     }
                     catch (Exception ex)
                     {
@@ -399,7 +399,7 @@ namespace DiskCleaner.ViewModels
                         var restarted = _tweakService.SetNotepadNewSession(value);
                         StatusText = restarted
                             ? (value ? "记事本启动时将启动新会话并放弃未保存的更改，已重启记事本使设置生效。" : "记事本启动时将继续上一个会话，已重启记事本使设置生效。")
-                            : (value ? "记事本已设置为启动新会话，下次打开记事本时生效。" : "记事本已设置为继续上一个会话，下次打开记事本时生效。");
+                            : (value ? "记事本已设置为启动新会话，将在下次打开记事本时生效；若记事本正在运行，请先保存并关闭后再重新打开。" : "记事本已设置为继续上一个会话，将在下次打开记事本时生效；若记事本正在运行，请先保存并关闭后再重新打开。");
                     }
                     catch (Exception ex)
                     {

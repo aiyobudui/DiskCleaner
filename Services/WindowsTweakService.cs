@@ -209,12 +209,19 @@ namespace DiskCleaner.Services
         {
             try
             {
-                // 关闭所有正在运行的记事本进程，使注册表改动在下次启动时生效
-                foreach (var p in Process.GetProcessesByName("notepad"))
+                // 不强杀正在运行的记事本：Kill 会静默丢失用户未保存的内容。
+                // 有实例在运行时放弃自动重启，仅改注册表（下次打开时生效），由调用方提示用户手动关闭。
+                var running = Process.GetProcessesByName("notepad");
+                try
                 {
-                    try { p.Kill(); p.WaitForExit(2000); } catch { }
+                    if (running.Length > 0)
+                        return false;
                 }
-                // 重新启动记事本（Windows 11 上 notepad.exe 即新版多标签页记事本）
+                finally
+                {
+                    foreach (var p in running) p.Dispose();
+                }
+                // 无运行实例：重新启动记事本（Windows 11 上 notepad.exe 即新版多标签页记事本）
                 Process.Start("notepad.exe");
                 return true;
             }

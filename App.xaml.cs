@@ -16,6 +16,7 @@ namespace DiskCleaner
             
             if (!SystemOptimizeService.IsRunningAsAdministrator())
             {
+                var elevated = false;
                 try
                 {
                     var exe = Process.GetCurrentProcess().MainModule?.FileName;
@@ -27,9 +28,19 @@ namespace DiskCleaner
                             UseShellExecute = true,
                             Verb = "runas"
                         });
+                        elevated = true;
                     }
                 }
                 catch { }
+
+                if (!elevated)
+                {
+                    MessageBox.Show(
+                        "本程序需要管理员权限才能运行。\n\n已尝试自动提权但被取消或失败，请右键“以管理员身份运行”后重试。",
+                        "需要管理员权限",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Warning);
+                }
                 Shutdown();
                 return;
             }
@@ -70,8 +81,9 @@ namespace DiskCleaner
 
         protected override void OnExit(ExitEventArgs e)
         {
-            
-            MainViewModel.PurgeDeletedBackupsOnExit();
+            // 注意：不要在此清理 ContextMenuBackups 备份目录。
+            // 该目录保存已删除右键项的 .reg 备份与 deleted-manifest.json，
+            // “撤销删除”与跨会话恢复（RehydrateDeletedItems）都依赖它；清空会使已删除项无法再恢复。
             base.OnExit(e);
         }
     }

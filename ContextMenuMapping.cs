@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -115,7 +116,14 @@ namespace DiskCleaner
                 if (string.IsNullOrWhiteSpace(file)) return false;
                 string full = Path.GetFullPath(file);
                 string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-                return !string.IsNullOrWhiteSpace(win) && full.StartsWith(win, StringComparison.OrdinalIgnoreCase);
+                if (string.IsNullOrWhiteSpace(win)) return false;
+                // 必须带目录分隔符边界：只有位于 C:\Windows\ 之下的路径才算系统目录，
+                // 避免把 C:\Windows.old、C:\WindowsApps 等“以 Windows 开头但非系统目录本体”的路径误判为系统。
+                string prefix = win.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+                    ? win
+                    : win + Path.DirectorySeparatorChar;
+                return full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    || full.Equals(win, StringComparison.OrdinalIgnoreCase);
             }
             catch { return false; }
         }
@@ -175,7 +183,6 @@ namespace DiskCleaner
                 using var clsid = OpenClsidKey(guid);
                 if (clsid == null)
                 {
-                    Debug.WriteLine($"[GetClsidServerFile] OpenClsidKey returned null for guid={guid}");
                     return null;
                 }
                 using (var s = clsid.OpenSubKey("InprocServer32", false))
@@ -199,11 +206,9 @@ namespace DiskCleaner
                     if (!string.IsNullOrWhiteSpace(v)) return v;
                 }
             }
-            catch (Exception ex)
+            catch
             {
-                Debug.WriteLine($"[GetClsidServerFile] EXCEPTION guid={guid}: {ex.Message}");
             }
-            Debug.WriteLine($"[GetClsidServerFile] returning null for guid={guid}");
             return null;
         }
 
@@ -342,7 +347,7 @@ namespace DiskCleaner
         private static readonly Regex _accelRegex = new Regex(@"\s*\(&[A-Za-z0-9]\)\s*", RegexOptions.Compiled);
 
         
-        private static readonly Dictionary<string, string> _assocCache = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly ConcurrentDictionary<string, string> _assocCache = new(StringComparer.OrdinalIgnoreCase);
 
         
         
@@ -835,9 +840,16 @@ namespace DiskCleaner
                             dll = Environment.ExpandEnvironmentVariables(dll.Trim().Trim('"'));
                             if (File.Exists(dll))
                             {
-                                var info = FileVersionInfo.GetVersionInfo(dll);
-                                var product = info.ProductName ?? info.FileDescription;
-                                if (!string.IsNullOrWhiteSpace(product)) return StripAccelerator(product);
+                                try
+                                {
+                                    var info = FileVersionInfo.GetVersionInfo(dll);
+                                    var product = info.ProductName ?? info.FileDescription;
+                                    if (!string.IsNullOrWhiteSpace(product)) return StripAccelerator(product);
+                                }
+                                catch { }
+                                // 兜底：无版本信息时显示 DLL 文件名（去扩展名），避免界面暴露裸 GUID
+                                var dllName = Path.GetFileNameWithoutExtension(dll);
+                                if (!string.IsNullOrWhiteSpace(dllName)) return dllName;
                             }
                         }
 
@@ -949,17 +961,8 @@ namespace DiskCleaner
         private static string TryAssocQueryCached(string assoc)
         {
             if (string.IsNullOrWhiteSpace(assoc)) return null;
-            lock (_assocCache)
-            {
-                if (_assocCache.TryGetValue(assoc, out var cached))
-                    return cached;
-            }
-            var result = NativeMethods.GetAssocFriendlyDocName(assoc);
-            lock (_assocCache)
-            {
-                _assocCache[assoc] = result;
-            }
-            return result;
+            // GetOrAdd 的 valueFactory 在极端并发下可能执行多次，但 GetAssocFriendlyDocName 无副作用，结果一致。
+            return _assocCache.GetOrAdd(assoc, a => NativeMethods.GetAssocFriendlyDocName(a));
         }
 
         
@@ -1032,14 +1035,26 @@ namespace DiskCleaner
         private static bool ContainsToken(string s, params string[] tokens)
         {
             if (string.IsNullOrWhiteSpace(s)) return false;
-            var lower = s.ToLowerInvariant();
+            // 直接忽略大小写匹配，避免为每个 token 反复生成小写副本
             foreach (var t in tokens)
-                if (!string.IsNullOrWhiteSpace(t) && lower.Contains(t.ToLowerInvariant()))
+                if (!string.IsNullOrWhiteSpace(t) && s.Contains(t, StringComparison.OrdinalIgnoreCase))
                     return true;
             return false;
         }
 
+        // 进程级缓存：同一项在扫描中被反复判定时避免重复打开注册表（扫描热路径）。
+        private static readonly ConcurrentDictionary<string, bool> _systemItemCache = new(StringComparer.OrdinalIgnoreCase);
+
         public static bool IsSystemContextMenuItem(string keyName, string guid)
+        {
+            var cacheKey = (keyName ?? "") + "\u0001" + (guid ?? "");
+            if (_systemItemCache.TryGetValue(cacheKey, out var cached)) return cached;
+            var result = IsSystemContextMenuItemCore(keyName, guid);
+            _systemItemCache.TryAdd(cacheKey, result);
+            return result;
+        }
+
+        private static bool IsSystemContextMenuItemCore(string keyName, string guid)
         {
             if (IsNotepadApp(keyName, guid)) return false; // 记事本：按普通应用显示，不隐藏
 
@@ -1076,10 +1091,7 @@ namespace DiskCleaner
                                     {
                                         var exe = ExtractFirstExecutablePath(cmd);
                                         if (!string.IsNullOrWhiteSpace(exe) && IsUnderWindowsDirectory(exe))
-                                        {
-                                            Debug.WriteLine($"[IsSystem] verb={keyName} command={exe} → system");
                                             return true;
-                                        }
                                     }
                                 }
                             }
@@ -1098,10 +1110,7 @@ namespace DiskCleaner
                     
                     var server = GetClsidServerFile(g);
                     if (IsUnderWindowsDirectory(server))
-                    {
-                        Debug.WriteLine($"[IsSystem] CLSID {guid} → server={server} → system");
                         return true;
-                    }
 
                     
                     try
@@ -1111,26 +1120,10 @@ namespace DiskCleaner
                         {
                             var loc = clsidKey.GetValue("LocalizedString") as string;
                             if (IsSystemResourceReference(loc))
-                            {
-                                Debug.WriteLine($"[IsSystem] CLSID {guid} → LocalizedString={loc} → system");
                                 return true;
-                            }
-                        }
-                        else
-                        {
-                            Debug.WriteLine($"[IsSystem] CLSID {guid} → clsidKey=null");
                         }
                     }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"[IsSystem] CLSID {guid} → ex: {ex.Message}");
-                    }
-
-                    Debug.WriteLine($"[IsSystem] CLSID {guid} → server={server} not under windows, loc check failed");
-                }
-                else
-                {
-                    Debug.WriteLine($"[IsSystem] guid={guid} → NormalizeClsid returned null");
+                    catch { }
                 }
             }
 

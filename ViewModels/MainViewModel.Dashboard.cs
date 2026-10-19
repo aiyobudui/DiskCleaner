@@ -176,7 +176,7 @@ namespace DiskCleaner.ViewModels
                 _releaseMessageCts = new CancellationTokenSource();
                 var cts = _releaseMessageCts;
 
-                ReleaseStatusMessage = "正在释放系统内存...";
+                ReleaseStatusMessage = "正在整理系统内存...";
                 var (message, _, _) = await Task.Run(() =>
                     SystemOptimizeService.OptimizeMemory(msg => _uiDispatcher.Invoke(() => ReleaseStatusMessage = msg)));
                 ReleaseStatusMessage = message;
@@ -192,8 +192,8 @@ namespace DiskCleaner.ViewModels
             }
             catch (Exception ex)
             {
-                ReleaseStatusMessage = "释放系统内存失败: " + ex.Message;
-                _logger.Error("释放系统内存失败", ex);
+                ReleaseStatusMessage = "整理系统内存失败: " + ex.Message;
+                _logger.Error("整理系统内存失败", ex);
             }
         }
 

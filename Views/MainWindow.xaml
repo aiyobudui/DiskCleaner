@@ -945,10 +945,10 @@
                                         <TextBlock Text="&#x5185;&#x5B58;" FontSize="10" Foreground="{DynamicResource text-muted}" HorizontalAlignment="Center" Margin="0,2,0,0"/>
                                     </StackPanel>
                                 </Grid>
-                                <Button Content="&#x91CA;&#x653E;" Command="{Binding FreeMemoryCommand}"
+                                <Button Content="&#x6574;&#x7406;" Command="{Binding FreeMemoryCommand}"
                                         Style="{DynamicResource MiniButton}" HorizontalAlignment="Center"
                                         Margin="0"
-                                        ToolTip="&#x904D;&#x5386;&#x7CFB;&#x7EDF;&#x6240;&#x6709;&#x8FDB;&#x7A0B;&#x5E76;&#x6E05;&#x7406;&#x5DE5;&#x4F5C;&#x96C6;&#xFF0C;&#x91CA;&#x653E;&#x7CFB;&#x7EDF;&#x6574;&#x4F53;&#x7269;&#x7406;&#x5185;&#x5B58;&#xFF08;&#x975E;&#x4EC5;&#x672C;&#x7A0B;&#x5E8F;&#xFF09;&#x3002;"/>
+                                        ToolTip="&#x904D;&#x5386;&#x7CFB;&#x7EDF;&#x6240;&#x6709;&#x8FDB;&#x7A0B;&#x5E76;&#x6E05;&#x7406;&#x5DE5;&#x4F5C;&#x96C6;&#xFF0C;&#x6574;&#x7406;&#x7CFB;&#x7EDF;&#x6574;&#x4F53;&#x7269;&#x7406;&#x5185;&#x5B58;&#xFF08;&#x975E;&#x4EC5;&#x672C;&#x7A0B;&#x5E8F;&#xFF09;&#x3002;"/>
                                 <TextBlock Text="{Binding ReleaseStatusMessage}" FontSize="11"
                                            Foreground="{DynamicResource accent-green}"
                                            HorizontalAlignment="Center"
@@ -1442,7 +1442,7 @@
                                                 <TextBlock Text="&#x1F4C1;" FontSize="18" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                                 <TextBlock Text="&#x7528;&#x6237;&#x6587;&#x4EF6;&#x5939;&#x4F4D;&#x7F6E;&#x91CD;&#x5B9A;&#x5411;" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource text-primary}"/>
                                             </StackPanel>
-                                            <TextBlock Text="&#x5C06;&#x684C;&#x9762;&#x3001;&#x6587;&#x6863;&#x3001;&#x4E0B;&#x8F7D;&#x3001;&#x56FE;&#x7247;&#x3001;&#x97F3;&#x4E50;&#x3001;&#x89C6;&#x9891;&#x7B49;&#x7528;&#x6237;&#x6587;&#x4EF6;&#x5939;&#x642C;&#x8FC1;&#x5230;&#x5176;&#x4ED6;&#x4F4D;&#x7F6E;&#xFF0C;&#x91CA;&#x653E; C &#x76D8;&#x7A7A;&#x95F4;&#x3002;&#x4F7F;&#x7528; Windows &#x539F;&#x751F; SHSetKnownFolderPath API&#xFF0C;&#x7CFB;&#x7EDF;&#x7EA7;&#x91CD;&#x5B9A;&#x5411;&#xFF0C;&#x6240;&#x6709;&#x7A0B;&#x5E8F;&#x81EA;&#x52A8;&#x9002;&#x5E94;&#x65B0;&#x4F4D;&#x7F6E;&#x3002;" FontSize="11" Foreground="{DynamicResource text-secondary}" TextWrapping="Wrap"/>
+                                            <TextBlock Text="&#x5C06;&#x684C;&#x9762;&#x3001;&#x6587;&#x6863;&#x3001;&#x4E0B;&#x8F7D;&#x3001;&#x56FE;&#x7247;&#x3001;&#x97F3;&#x4E50;&#x3001;&#x89C6;&#x9891;&#x7B49;&#x7528;&#x6237;&#x6587;&#x4EF6;&#x5939;&#x642C;&#x8FC1;&#x5230;&#x5176;&#x4ED6;&#x4F4D;&#x7F6E;&#xFF0C;&#x53EF;&#x91CA;&#x653E;&#x43;&#x76D8;&#x6216;&#x91CD;&#x88C5;&#x7CFB;&#x7EDF;&#x540E;&#x6587;&#x4EF6;&#x4E0D;&#x4F1A;&#x4E22;&#x5931;&#x3002;&#x7CFB;&#x7EDF;&#x7EA7;&#x91CD;&#x5B9A;&#x5411;&#xFF0C;&#x7CFB;&#x7EDF;&#x4F1A;&#x81EA;&#x52A8;&#x9002;&#x5E94;&#x65B0;&#x7684;&#x4F4D;&#x7F6E;&#xFF0C;&#x8FC1;&#x79FB;&#x4E4B;&#x524D;&#x8BF7;&#x5148;&#x786E;&#x5B9A;&#x6587;&#x4EF6;&#x6CA1;&#x6709;&#x88AB;&#x5360;&#x7528;&#x3002;" FontSize="11" Foreground="{DynamicResource text-secondary}" TextWrapping="Wrap"/>
                                         </StackPanel>
                                     </Border>
 

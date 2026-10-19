@@ -1313,9 +1313,9 @@ namespace DiskCleaner.ViewModels
                 foreach (var entry in entries)
                 {
                     string fullKey = $@"HKCR\{entry.RegistryPath}\{entry.KeyName}";
-                    string backupFile = null;
 
-                    
+                    // 1. 先备份。备份失败则跳过删除，避免产生“删了却无法恢复”的不可逆项。
+                    string backupFile = null;
                     try
                     {
                         var safe = string.Concat((item.Name + "_" + entry.KeyName + "_" + entry.RegistryPath).Split(Path.GetInvalidFileNameChars()));
@@ -1323,9 +1323,13 @@ namespace DiskCleaner.ViewModels
                         RegExport(fullKey, backupFile);
                         backupFiles.Add(backupFile);
                     }
-                    catch (Exception ex) { _logger?.Error($"备份右键项失败: {item.Name}", ex); }
+                    catch (Exception ex)
+                    {
+                        _logger?.Error($"备份右键项失败，已跳过删除以免不可恢复: {item.Name} / {fullKey}", ex);
+                        continue;
+                    }
 
-                    
+                    // 2. 再删除
                     bool deletedThisEntry = false;
                     try
                     {
@@ -1339,8 +1343,8 @@ namespace DiskCleaner.ViewModels
                     }
                     catch (Exception ex) { _logger?.Error($"删除注册表项失败: {fullKey}", ex); }
 
-                    
-                    if (deletedThisEntry && backupFile != null)
+                    // 3. 删除成功才写 manifest（此时备份必已成功）
+                    if (deletedThisEntry)
                     {
                         PersistDeletedEntry(new DeletedManifestEntry
                         {
@@ -1351,6 +1355,12 @@ namespace DiskCleaner.ViewModels
                             Category = (int)item.Category,
                             BackupFile = backupFile
                         });
+                    }
+                    else
+                    {
+                        // 删除失败：撤销刚才的备份，避免孤儿 .reg 在备份目录里累积
+                        try { File.Delete(backupFile); } catch { }
+                        backupFiles.Remove(backupFile);
                     }
                 }
 
@@ -1393,13 +1403,16 @@ namespace DiskCleaner.ViewModels
                             RegImport(manifestEntry.BackupFile);
                             try { File.Delete(manifestEntry.BackupFile); } catch { }
                             restoredCount++;
+                            // 仅在实际恢复成功后才移除 manifest 条目；
+                            // 失败时保留条目与 .reg 备份，允许用户稍后重试。
+                            RemoveDeletedEntry(entry.RegistryPath, entry.KeyName, (int)item.Category);
                         }
                         catch (Exception ex) { _logger?.Error($"恢复注册表项失败: {entry.RegistryPath}\\{entry.KeyName}", ex); }
                     }
-                    RemoveDeletedEntry(entry.RegistryPath, entry.KeyName, (int)item.Category);
                 }
 
-                _uiDispatcher.Invoke(() => item.IsDeleted = false);
+                // 只要有任一注册表路径未恢复成功，就保持“已删除可恢复”状态，避免伪装成功
+                _uiDispatcher.Invoke(() => item.IsDeleted = restoredCount < entries.Count);
                 
                 
                 _logger?.Info($"已撤销删除右键项: {item.Name} ({restoredCount}/{entries.Count} 个注册表路径已恢复)");
@@ -1484,17 +1497,6 @@ namespace DiskCleaner.ViewModels
         
         
         
-        
-        public static void PurgeDeletedBackupsOnExit()
-        {
-            try
-            {
-                if (Directory.Exists(_contextMenuBackupDir))
-                    Directory.Delete(_contextMenuBackupDir, recursive: true);
-            }
-            catch { }
-        }
-
         
         private static readonly object _manifestLock = new();
         private static readonly string _deletedManifestPath =

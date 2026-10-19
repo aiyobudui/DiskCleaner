@@ -451,7 +451,7 @@ namespace DiskCleaner.Services
             int optimized = 0;
             long freedKB = 0;
 
-            report("正在释放系统内存（清理各进程工作集）...");
+            report("正在整理系统内存（清理各进程工作集）...");
 
             try
             {
@@ -492,15 +492,15 @@ namespace DiskCleaner.Services
             }
             catch (Exception ex)
             {
-                report($"释放系统内存失败: {ex.Message}");
+                report($"整理系统内存失败: {ex.Message}");
             }
 
             double freedMB = freedKB / 1024.0;
             if (optimized > 0)
-                report($"完成: 已优化 {optimized} 个进程，释放约 {freedMB:F1} MB");
+                report($"完成: 已优化 {optimized} 个进程，整理约 {freedMB:F1} MB");
             else
-                report("没有可释放的进程内存。");
-            return ($"已清理 {optimized} 个进程，释放约 {freedMB:F1} MB", optimized, freedMB);
+                report("没有可整理的进程内存。");
+            return ($"已清理 {optimized} 个进程，整理约 {freedMB:F1} MB", optimized, freedMB);
         }
 
     }

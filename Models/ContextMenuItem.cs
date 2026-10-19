@@ -130,12 +130,12 @@ namespace DiskCleaner.Models
                 if (ok)
                 {
                     _isEnabled = value;
-                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(IsEnabled));
                 }
                 else
                 {
-                    
-                    OnPropertyChanged();
+                    // 切换被拒绝：状态保持不变，仍通知一次让界面回滚
+                    OnPropertyChanged(nameof(IsEnabled));
                 }
             }
         }

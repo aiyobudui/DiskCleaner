@@ -9,6 +9,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Security.Principal;
 using System.Text.RegularExpressions;
 using System.Collections.Concurrent;
 using System.Threading;
@@ -142,7 +143,7 @@ namespace DiskCleaner.ViewModels
             var systemGroup = new CleanGroup("系统清理");
             systemGroup.AddRange(new List<ICleanNode>
             {
-                MakeCleanItem("temp_files", "临时文件", "清理 Windows 与用户临时文件目录", RiskLevel.Safe, CleanTempFiles),
+                MakeCleanItem("temp_files", "临时文件", "清理 Windows 与用户临时文件目录（含 SquirrelTemp 安装器临时目录）", RiskLevel.Safe, CleanTempFiles),
                 MakeCleanItem("minidumps", "系统错误小型转储文件", "删除 C:\\Windows\\Minidump 中的小型转储文件", RiskLevel.Safe, CleanMinidumps),
                 MakeCleanItem("windows_logs", "Windows 日志文件", "清理 C:\\Windows\\Logs 目录（清理前自动停止 Windows Update / WaaSMedic 等更新服务以释放被锁定的日志，清理后自动恢复）", RiskLevel.Safe,
                     () => CleanService.CleanWindowsLogs(_logger),
@@ -155,7 +156,7 @@ namespace DiskCleaner.ViewModels
                     () => Directory.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), @"Microsoft\Windows\WER"))),
                 MakeCleanItem("delivery_optimization", "传递优化文件", "清理 Windows 传递优化与更新下载缓存", RiskLevel.Safe, CleanDeliveryOptimization),
                 MakeCleanItem("windows_widgets", "Windows 小组件", "清理 Windows 小组件（WebExperience）缓存", RiskLevel.Safe, CleanWindowsWidgets),
-                MakeCleanItem("directx_shader_cache", "DirectX 着色器缓存", "清理 DirectX 着色器缓存（D3DSCache）", RiskLevel.Safe, CleanDirectXShaderCache),
+                MakeCleanItem("directx_shader_cache", "显卡着色器缓存", "清理显卡着色器缓存：D3DSCache，以及 NVIDIA DXCache/GLCache、AMD DxcCache/DxCache/VkCache/OglCache。删除后会在游戏首次加载时自动重建", RiskLevel.Safe, CleanDirectXShaderCache),
                 MakeCleanItem("cert_cache", "Windows 网络证书缓存", "清理用于证书验证的网络缓存（CryptnetUrlCache，如 CRL/OCSP 响应）", RiskLevel.Safe, CleanCertCache),
                 MakeCleanItem("prefetch", "预读取文件", "清理 C:\\Windows\\Prefetch 中的预读取缓存（不影响已安装程序运行）", RiskLevel.Safe, CleanPrefetch),
                 MakeCleanItem("memory_dump", "内存转储文件", "删除 C:\\Windows\\MEMORY.DMP（系统蓝屏后生成的大型转储，可释放数 GB）", RiskLevel.Safe, CleanMemoryDump),
@@ -185,6 +186,9 @@ namespace DiskCleaner.ViewModels
                 MakeCleanItem("dingtalk_cache", "钉钉缓存", "清理钉钉缓存目录", RiskLevel.Safe, CleanDingTalkCache),
                 MakeCleanItem("netease_cache", "网易云音乐缓存", "清理网易云音乐缓存与 web 数据", RiskLevel.Safe, CleanNetEaseMusicCache),
                 MakeCleanItem("steam_cache", "Steam 缓存", "清理 Steam 下载缓存与 HTTP 缓存", RiskLevel.Safe, CleanSteamCache),
+                MakeCleanItem("battle_net_cache", "战网 Battle.net 缓存",
+                    "清理暴雪战网（Battle.net）桌面端缓存：Overlay 网页缓存（webview_cache_*，Chromium 内核，容易在不知不觉中涨到十几 GB）与 Electron 桌面端缓存（Cache/Code Cache/GPUCache）。均为纯缓存，删除后战网按需重建；清理前建议先关闭战网客户端。",
+                    RiskLevel.Safe, CleanBattleNetCache),
                 MakeCleanItem("baidu_pan_cache", "百度网盘缓存", "清理百度网盘客户端缓存目录", RiskLevel.Safe, CleanBaiduPanCache),
                 MakeCleanItem("thunder_cache", "迅雷缓存", "清理迅雷客户端缓存与种子缓存", RiskLevel.Safe, CleanThunderCache),
                 MakeCleanItem("bilibili_cache", "哔哩哔哩缓存", "清理哔哩哔哩客户端缓存", RiskLevel.Safe, CleanBilibiliCache),
@@ -203,6 +207,9 @@ namespace DiskCleaner.ViewModels
                 
                 MakeCleanItem("wechat_cache", "微信缓存", "仅清理微信 FileStorage\\Cache 临时缓存，绝不触碰聊天记录、聊天图片视频与接收的文件", RiskLevel.Safe, CleanWeChatCache),
                 MakeCleanItem("qq_cache", "QQ 缓存", "清理 QQ RichMedia 富媒体缩略图缓存，以及 QQ NT（新版）Chromium 内核缓存（Cache/Code Cache/GPUCache，含 Cache_Data）。均为纯缓存，与聊天数据（Roaming\\Tencent\\QQ\\Storage）隔离，绝不触碰聊天图片视频与接收的文件", RiskLevel.Safe, CleanQQCache),
+                MakeCleanItem("qq_nt_media", "QQ NT 聊天媒体缓存",
+                    "清理新版 QQ（NT 架构）的聊天媒体缓存：nt_qq\\nt_data 目录下的 Pic（聊天图片）、Emoji（表情）、Video（聊天视频）、avatar（头像）缓存。这些是聊天中收发过图片/视频的本地缓存副本，删除后聊天记录本身（nt_db 数据库）完全不受影响，图片/视频在需要时会重新加载。仅删除上述媒体缓存子目录，绝不触碰 nt_db 聊天记录库。清理前建议先关闭 QQ，否则运行中的 QQ 进程会占用这些文件导致无法删除。",
+                    RiskLevel.Caution, CleanQQNtMedia),
                 MakeCleanItem("wxwork_cache", "企业微信缓存", "仅清理企业微信 Cache 临时缓存，保留聊天记录、图片视频与接收的文件", RiskLevel.Safe, CleanWXWorkCache),
                 MakeCleanItem("mailmaster_cache", "网易邮箱大师缓存", "清理网易邮箱大师客户端缓存", RiskLevel.Safe, CleanMailMasterCache),
 
@@ -336,7 +343,11 @@ namespace DiskCleaner.ViewModels
             var recycleGroup = new CleanGroup("回收站");
             var emptyRecycleItem = MakeCleanItem("empty_recycle_bin", "清空回收站", "⚠ 将清空【所有磁盘】的回收站，包括您手动删除的文件，不可恢复。其余清理项现在直接删除（不再移入回收站）。仅当您确认不再需要回收站内任何内容时，才勾选此项。", RiskLevel.Caution, () => CleanService.EmptyRecycleBin(_logger));
             emptyRecycleItem.IsChecked = false; 
-            recycleGroup.AddRange(new[] { emptyRecycleItem }); 
+            var orphanRecycleItem = MakeCleanItem("orphan_recycle", "孤儿回收站数据",
+                "清理 Windows 识别不到的“孤儿回收站”数据：回收站中索引已丢失/损坏、系统界面与“清空回收站”命令都看不见也删不掉的数据（常见于异常删除、磁盘迁移、某些工具写入 $RECYCLE.BIN）。此类文件真实占用磁盘空间但永远无法通过回收站恢复，删除不损失任何可恢复性。仅统计各盘 $RECYCLE.BIN 中当前账户下无对应索引（$I）的孤儿数据。",
+                RiskLevel.Caution, CleanOrphanRecycleBin);
+            orphanRecycleItem.IsChecked = false;
+            recycleGroup.AddRange(new[] { emptyRecycleItem, orphanRecycleItem }); 
 
             CleanGroups = new ObservableCollection<CleanGroup> { systemGroup, appGroup, appLogGroup, usageTracesGroup, registryCleanGroup, recycleGroup };
 
@@ -345,7 +356,9 @@ namespace DiskCleaner.ViewModels
 
         // 浏览器/客户端类缓存项：关联其进程名，运行时在卡片上显示“关闭并清理”按钮。
         // 点击按钮 → 杀掉关联进程 → 再执行本项清理（解决“程序开着导致缓存文件被占用删不掉”的问题）。
-        // 范围：浏览器 + 用户近期涉及的 Quark/Androws/GitHub Desktop 等；其余客户端（微信/QQ/飞书…）保持 best-effort 删除，避免误杀带用户数据的进程。
+        // 范围：浏览器 + 用户近期涉及的 Quark/Androws/GitHub Desktop 等；其余客户端（微信/飞书…）保持 best-effort 删除，避免误杀带用户数据的进程。
+        // 例外：qq_nt_media（QQ NT 聊天媒体缓存）占用文件句柄的正是 QQ 进程，不关 QQ 就删不掉，
+        // 故加入“关闭并清理”（按钮触发前有显式确认框，提示未保存内容可能丢失）。
         // 注意：ie_cache / legacy_edge_cache 共用 WebCacheV01.dat，由系统进程(dllhost/explorer)锁定；
         // 杀 IE/Edge 浏览器进程解不开该锁，而杀系统进程违反项目安全约定（项目说明 L385/L1394），故两者均不加关闭按钮。
         private static readonly Dictionary<string, string[]> BrowserProcessNames = new()
@@ -358,6 +371,8 @@ namespace DiskCleaner.ViewModels
             ["quark_cache"] = new[] { "Quark" },
             ["androws_cef_cache"] = new[] { "Androws" },
             ["github_cache"] = new[] { "GitHubDesktop" },
+            ["battle_net_cache"] = new[] { "Battle.net" },
+            ["qq_nt_media"] = new[] { "QQ" },
             ["browser360_cache"] = new[] { "360Chrome" },
             ["sogou_cache"] = new[] { "SogouExplorer", "SogouBrowser" },
             ["qq_browser_cache"] = new[] { "QQBrowser" },
@@ -625,7 +640,7 @@ namespace DiskCleaner.ViewModels
                 dict[kvp.Key] = kvp.Value;
 
             // —— 系统清理 ——
-            dict["temp_files"] = new[] { Path.Combine(win, "Temp"), temp };
+            dict["temp_files"] = new[] { Path.Combine(win, "Temp"), temp, Path.Combine(local, "SquirrelTemp") };
             dict["minidumps"] = new[] { Path.Combine(win, "Minidump"), Path.Combine(win, "*.dmp") };
             dict["windows_logs"] = new[] { Path.Combine(win, "Logs") };
             dict["driver_packages"] = new[] { "孤立的旧设备驱动包（oem*.inf，通过 pnputil /delete-driver 卸载，不影响在用驱动）" };
@@ -634,7 +649,11 @@ namespace DiskCleaner.ViewModels
             dict["wer"] = new[] { Path.Combine(common, @"Microsoft\Windows\WER") };
             dict["delivery_optimization"] = new[] { Path.Combine(win, @"SoftwareDistribution\DeliveryOptimization"), Path.Combine(win, @"SoftwareDistribution\Download") };
             dict["windows_widgets"] = new[] { Path.Combine(local, @"Packages\MicrosoftWindows.Client.WebExperience_cw5n1h2txyewy\LocalCache") };
-            dict["directx_shader_cache"] = new[] { Path.Combine(local, "D3DSCache") };
+            dict["directx_shader_cache"] = new[] {
+                Path.Combine(local, "D3DSCache"),
+                Path.Combine(local, @"NVIDIA\DXCache"), Path.Combine(local, @"NVIDIA\GLCache"),
+                Path.Combine(local, @"AMD\DxcCache"), Path.Combine(local, @"AMD\DxCache"),
+                Path.Combine(local, @"AMD\VkCache"), Path.Combine(local, @"AMD\OglCache") };
             dict["cert_cache"] = new[] { Path.Combine(local, @"Microsoft\CryptnetUrlCache") };
             dict["prefetch"] = new[] { Path.Combine(win, "Prefetch") };
             dict["memory_dump"] = new[] { Path.Combine(win, "MEMORY.DMP") };
@@ -663,6 +682,9 @@ namespace DiskCleaner.ViewModels
             dict["dingtalk_cache"] = new[] { Path.Combine(local, @"DingTalk\Cache"), Path.Combine(local, @"DingTalk\update") };
             dict["netease_cache"] = new[] { Path.Combine(local, @"NetEase\CloudMusic\Cache") };
             dict["steam_cache"] = new[] { Path.Combine(x86, @"Steam\appcache"), Path.Combine(x86, @"Steam\httpcache"), Path.Combine(x86, @"Steam\config\htmlcache") };
+            dict["battle_net_cache"] = new[] {
+                Path.Combine(roaming, @"Battle.net\Overlay") + "（webview_cache_*）",
+                Path.Combine(roaming, @"Battle.net\Electron") + "（Cache / Code Cache / GPUCache）" };
             dict["baidu_pan_cache"] = new[] { Path.Combine(local, @"Baidu\BaiduNetdisk\cache"), Path.Combine(local, @"Baidu\BaiduNetdisk\tmp") };
             dict["thunder_cache"] = new[] { Path.Combine(local, @"Thunder Network\Thunder\Profiles\Cache"), Path.Combine(local, @"Thunder Network\XLLiveUD\Cache") };
             dict["bilibili_cache"] = new[] { Path.Combine(local, @"bilibili\Cache"), Path.Combine(local, @"Bilibili\Cache") };
@@ -679,6 +701,7 @@ namespace DiskCleaner.ViewModels
             dict["kuaishou_cache"] = new[] { Path.Combine(local, @"Kuaishou\Cache"), Path.Combine(local, @"Kuaishou\Application\Cache") };
             dict["wechat_cache"] = new[] { Path.Combine(user, @"Documents\WeChat Files") + @"（各账号 FileStorage\Cache）", Path.Combine(local, @"Tencent\WeChat") + @"（各账号 FileStorage\Cache）" };
             dict["qq_cache"] = new[] { Path.Combine(user, @"Documents\Tencent Files") + "（各账号 RichMedia）", Path.Combine(local, @"Tencent\QQ\Cache"), Path.Combine(local, @"Tencent\QQ\Code Cache"), Path.Combine(local, @"Tencent\QQ\GPUCache") };
+            dict["qq_nt_media"] = new[] { Path.Combine(user, @"Documents\Tencent Files") + "（各账号 nt_qq\\nt_data 下的 Pic / Emoji / Video / avatar，不含 nt_db）" };
             dict["wxwork_cache"] = new[] { Path.Combine(user, @"Documents\WXWork") + "（各账号 Cache）" };
             dict["mailmaster_cache"] = new[] { Path.Combine(local, @"MailMaster\Cache"), Path.Combine(local, @"MailMaster\Application\Cache") };
             dict["qq_browser_cache"] = new[] { Path.Combine(local, @"Tencent\QQBrowser\User Data") + "（Cache / Code Cache）" };
@@ -712,6 +735,7 @@ namespace DiskCleaner.ViewModels
                 @"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\LastVisitedMRU",
                 @"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\CIDSizeMRU" };
             dict["empty_recycle_bin"] = new[] { "回收站（所有磁盘）" };
+            dict["orphan_recycle"] = new[] { "各盘 $RECYCLE.BIN\\当前账户（仅 $R/$I 无对应索引的孤儿项，系统识别不到）" };
 
             // —— 无效注册表项类 ——
             dict["invalid_startup"] = new[] {
@@ -877,7 +901,10 @@ namespace DiskCleaner.ViewModels
             
             var r1 = CleanService.DeleteDirContents(winTemp, _logger, null);
             var r2 = CleanService.DeleteDirContents(Path.GetTempPath(), _logger, null);
-            return Aggregate(r1, r2);
+            var r3 = CleanService.DeleteDirContents(
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SquirrelTemp"),
+                _logger, null);
+            return Aggregate(r1, r2, r3);
         }
 
         private CleanService.CleanResult CleanMinidumps()
@@ -1695,6 +1722,128 @@ namespace DiskCleaner.ViewModels
                 if (Directory.Exists(c)) CleanService.DeleteDirContents(c, _logger);
         }
 
+        // 清理新版 QQ（NT 架构）的聊天媒体缓存：仅 nt_data 下的 Pic / Emoji / Video / avatar 等媒体缓存子目录，
+        // 绝不触碰 nt_db（聊天记录数据库）。这些文件常被运行中的 QQ 进程占用导致删不掉，建议配合“关闭并清理”按钮（先关 QQ 再清）。
+        private void CleanQQNtMedia()
+        {
+            var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            var tencentRoot = Path.Combine(documents, "Tencent Files");
+            if (!Directory.Exists(tencentRoot)) return;
+            var mediaSubdirs = new[] { "Pic", "Emoji", "Video", "avatar" };
+            foreach (var qqDir in Directory.GetDirectories(tencentRoot))
+            {
+                var dirName = Path.GetFileName(qqDir);
+                if (dirName.Equals("All Users", StringComparison.OrdinalIgnoreCase)) continue;
+                var ntData = Path.Combine(qqDir, "nt_qq", "nt_data");
+                if (!Directory.Exists(ntData)) continue;
+                foreach (var sub in mediaSubdirs)
+                {
+                    var p = Path.Combine(ntData, sub);
+                    if (Directory.Exists(p)) CleanService.DeleteDirContents(p, _logger);
+                }
+            }
+        }
+
+        // 清理暴雪战网（Battle.net）桌面端缓存：Overlay 网页缓存（webview_cache_*，Chromium 内核，
+        // 本机曾实测单目录达 22GB）与 Electron 桌面端缓存（Cache/Code Cache/GPUCache）。均为纯缓存，删除后战网按需重建。
+        private CleanService.CleanResult CleanBattleNetCache()
+        {
+            var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var overlayRoot = Path.Combine(roaming, @"Battle.net\Overlay");
+            var results = new List<CleanService.CleanResult>();
+            if (Directory.Exists(overlayRoot))
+            {
+                foreach (var d in Directory.GetDirectories(overlayRoot, "webview_cache_*"))
+                    results.Add(CleanService.DeleteDirContents(d, _logger));
+            }
+            var electronRoot = Path.Combine(roaming, @"Battle.net\Electron");
+            results.Add(CleanCandidateDirs(
+                Path.Combine(electronRoot, "Cache"),
+                Path.Combine(electronRoot, "Code Cache"),
+                Path.Combine(electronRoot, "GPUCache")));
+            return results.Count > 0 ? Aggregate(results.ToArray()) : default;
+        }
+
+        // 清理“孤儿回收站”数据：回收站目录中 $R 数据无对应 $I 索引（或 $I 索引无对应 $R 数据）的项。
+        // 这类数据 Windows 回收站机制无法识别（SHQueryRecycleBin 返回 0、界面不显示、清空回收站命令无效），
+        // 但真实占用磁盘空间，且永远无法通过回收站恢复，因此删除不损失可恢复性。
+        // 仅处理当前用户 SID 的回收站目录，不触碰其他账户（SYSTEM/Administrator 等）的回收站。
+        private CleanService.CleanResult CleanOrphanRecycleBin()
+        {
+            var results = new List<CleanService.CleanResult>();
+            foreach (var sidDir in CurrentUserRecycleDirs())
+            {
+                var iMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // 码 -> $I 文件路径
+                var rMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // 码 -> $R 项路径
+                try
+                {
+                    var opts = new EnumerationOptions { RecurseSubdirectories = false, IgnoreInaccessible = true };
+                    foreach (var e in new DirectoryInfo(sidDir).EnumerateFileSystemInfos("*", opts))
+                    {
+                        var n = e.Name;
+                        if (n.Length <= 2) continue;
+                        if (n.StartsWith("$I", StringComparison.OrdinalIgnoreCase)) iMap[n.Substring(2)] = e.FullName;
+                        else if (n.StartsWith("$R", StringComparison.OrdinalIgnoreCase)) rMap[n.Substring(2)] = e.FullName;
+                    }
+                }
+                catch (Exception ex) { _logger?.Error($"枚举孤儿回收站失败: {sidDir}", ex); }
+
+                // 孤儿数据：$R 无对应 $I 索引（释放空间的主要来源）
+                foreach (var kv in rMap)
+                {
+                    if (iMap.ContainsKey(kv.Key)) continue;
+                    var p = kv.Value;
+                    long sz = 0;
+                    try { sz = (File.GetAttributes(p) & FileAttributes.Directory) != 0 ? DiskUtils.DirSize(p) : new FileInfo(p).Length; } catch { }
+                    var r = DeleteOrphanEntry(p);
+                    if (r.FilesSucceeded > 0) r = r with { BytesFreed = r.BytesFreed + sz };
+                    results.Add(r);
+                }
+                // 孤立索引：$I 无对应 $R 数据（几乎不占空间，一并清掉）
+                foreach (var kv in iMap)
+                {
+                    if (rMap.ContainsKey(kv.Key)) continue;
+                    results.Add(DeleteOrphanEntry(kv.Value));
+                }
+            }
+            return results.Count > 0 ? Aggregate(results.ToArray()) : default;
+        }
+
+        // 删除单个孤儿回收站项（文件或目录），目录递归删除；失败记录为失败路径。
+        private static CleanService.CleanResult DeleteOrphanEntry(string path)
+        {
+            try
+            {
+                if ((File.GetAttributes(path) & FileAttributes.Directory) != 0)
+                {
+                    if (Directory.Exists(path)) Directory.Delete(path, true);
+                }
+                else
+                {
+                    if (File.Exists(path)) File.Delete(path);
+                }
+                return new CleanService.CleanResult { FilesSucceeded = 1 };
+            }
+            catch
+            {
+                return new CleanService.CleanResult().WithFailedPath(path);
+            }
+        }
+
+        // 枚举各固定/可移动盘中当前用户 SID 的回收站目录（存在才返回）。
+        private static IEnumerable<string> CurrentUserRecycleDirs()
+        {
+            var sid = WindowsIdentity.GetCurrent()?.User?.Value;
+            if (string.IsNullOrEmpty(sid)) yield break;
+            foreach (var drive in DriveInfo.GetDrives())
+            {
+                if (!drive.IsReady) continue;
+                if (drive.DriveType != DriveType.Fixed && drive.DriveType != DriveType.Removable) continue;
+                var p = Path.Combine(drive.RootDirectory.FullName, "$RECYCLE.BIN", sid);
+                if (Directory.Exists(p)) yield return p;
+            }
+        }
+
         
         
         
@@ -2010,10 +2159,19 @@ namespace DiskCleaner.ViewModels
                 Path.Combine(local, @"Packages\MicrosoftWindows.Client.WebExperience_cw5n1h2txyewy\LocalCache"), _logger);
         }
 
-        private void CleanDirectXShaderCache()
+        private CleanService.CleanResult CleanDirectXShaderCache()
         {
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            CleanService.DeleteDirContents(Path.Combine(local, "D3DSCache"), _logger);
+            var r1 = CleanService.DeleteDirContents(Path.Combine(local, "D3DSCache"), _logger);
+            // 独立显卡着色器缓存（可重建）：NVIDIA DXCache/GLCache 与 AMD DxcCache/DxCache/VkCache/OglCache
+            var r2 = CleanCandidateDirs(
+                Path.Combine(local, @"NVIDIA\DXCache"),
+                Path.Combine(local, @"NVIDIA\GLCache"),
+                Path.Combine(local, @"AMD\DxcCache"),
+                Path.Combine(local, @"AMD\DxCache"),
+                Path.Combine(local, @"AMD\VkCache"),
+                Path.Combine(local, @"AMD\OglCache"));
+            return Aggregate(r1, r2);
         }
 
         private void CleanCertCache()
@@ -4685,7 +4843,8 @@ namespace DiskCleaner.ViewModels
                 switch (item.Id)
                 {
                     case "temp_files":
-                        return DirSize(Path.Combine(winDir, "Temp")) + DirSize(Path.GetTempPath());
+                        return DirSize(Path.Combine(winDir, "Temp")) + DirSize(Path.GetTempPath())
+                             + DirSize(Path.Combine(local, "SquirrelTemp"));
                     case "minidumps":
                         long size = 0;
                         var miniDumpDir = Path.Combine(winDir, "Minidump");
@@ -4812,10 +4971,30 @@ namespace DiskCleaner.ViewModels
                                 if (Directory.Exists(c)) ss += DirSize(c);
                             return ss;
                         }
+                    case "battle_net_cache":
+                        {
+                            var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                            var overlayRoot = Path.Combine(roaming, @"Battle.net\Overlay");
+                            long bs = 0;
+                            if (Directory.Exists(overlayRoot))
+                                foreach (var d in Directory.GetDirectories(overlayRoot, "webview_cache_*"))
+                                    bs += DirSize(d);
+                            var electronRoot = Path.Combine(roaming, @"Battle.net\Electron");
+                            bs += DirSize(Path.Combine(electronRoot, "Cache"))
+                                + DirSize(Path.Combine(electronRoot, "Code Cache"))
+                                + DirSize(Path.Combine(electronRoot, "GPUCache"));
+                            return bs;
+                        }
                     case "windows_widgets":
                         return DirSize(Path.Combine(local, @"Packages\MicrosoftWindows.Client.WebExperience_cw5n1h2txyewy\LocalCache"));
                     case "directx_shader_cache":
-                        return DirSize(Path.Combine(local, "D3DSCache"));
+                        return DirSize(Path.Combine(local, "D3DSCache"))
+                             + DirSize(Path.Combine(local, @"NVIDIA\DXCache"))
+                             + DirSize(Path.Combine(local, @"NVIDIA\GLCache"))
+                             + DirSize(Path.Combine(local, @"AMD\DxcCache"))
+                             + DirSize(Path.Combine(local, @"AMD\DxCache"))
+                             + DirSize(Path.Combine(local, @"AMD\VkCache"))
+                             + DirSize(Path.Combine(local, @"AMD\OglCache"));
                     case "cert_cache":
                         return DirSize(Path.Combine(local, @"Microsoft\CryptnetUrlCache"));
                     case "etw_logs":
@@ -5047,6 +5226,8 @@ namespace DiskCleaner.ViewModels
                         }
                     case "empty_recycle_bin":
                         return CleanService.GetRecycleBinSize();
+                    case "orphan_recycle":
+                        return OrphanRecycleBinSize();
 
                     
                     case "windows_upgrade_temp":
@@ -5094,6 +5275,8 @@ namespace DiskCleaner.ViewModels
                         return WeChatCacheSize();
                     case "qq_cache":
                         return QQCacheSize();
+                    case "qq_nt_media":
+                        return QQNtMediaSize();
                     case "wxwork_cache":
                         return WXWorkCacheSize();
                     case "mailmaster_cache":
@@ -5318,6 +5501,65 @@ namespace DiskCleaner.ViewModels
             })
                 if (Directory.Exists(c)) total += DirSize(c);
 
+            return total;
+        }
+
+        // 新版 QQ（NT 架构）聊天媒体缓存大小：仅统计 nt_data 下 Pic/Emoji/Video/avatar 等媒体缓存子目录，不含 nt_db 聊天记录库。
+        private static long QQNtMediaSize()
+        {
+            var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            var tencentRoot = Path.Combine(documents, "Tencent Files");
+            if (!Directory.Exists(tencentRoot)) return 0;
+            long total = 0;
+            var mediaSubdirs = new[] { "Pic", "Emoji", "Video", "avatar" };
+            foreach (var qqDir in Directory.GetDirectories(tencentRoot))
+            {
+                if (Path.GetFileName(qqDir).Equals("All Users", StringComparison.OrdinalIgnoreCase)) continue;
+                var ntData = Path.Combine(qqDir, "nt_qq", "nt_data");
+                if (!Directory.Exists(ntData)) continue;
+                foreach (var sub in mediaSubdirs)
+                {
+                    var p = Path.Combine(ntData, sub);
+                    if (Directory.Exists(p)) total += DirSize(p);
+                }
+            }
+            return total;
+        }
+
+        
+        // 孤儿回收站数据大小：各盘当前用户 SID 的回收站中，$R 数据无对应 $I 索引的项的大小合计。
+        // 这类数据系统识别不到（SHQueryRecycleBin 返回 0），只能直接统计 $RECYCLE.BIN 目录。
+        private static long OrphanRecycleBinSize()
+        {
+            long total = 0;
+            foreach (var sidDir in CurrentUserRecycleDirs())
+            {
+                var iCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var rOrphans = new List<(string Path, bool IsDir)>();
+                try
+                {
+                    var opts = new EnumerationOptions { RecurseSubdirectories = false, IgnoreInaccessible = true };
+                    // 先完整收集 $I 索引码，再判断 $R 是否为孤儿，避免枚举顺序导致误判正常回收站项
+                    foreach (var e in new DirectoryInfo(sidDir).EnumerateFileSystemInfos("*", opts))
+                    {
+                        var n = e.Name;
+                        if (n.Length <= 2) continue;
+                        if (n.StartsWith("$I", StringComparison.OrdinalIgnoreCase)) iCodes.Add(n.Substring(2));
+                    }
+                    foreach (var e in new DirectoryInfo(sidDir).EnumerateFileSystemInfos("*", opts))
+                    {
+                        var n = e.Name;
+                        if (n.Length <= 2) continue;
+                        if (n.StartsWith("$R", StringComparison.OrdinalIgnoreCase) && !iCodes.Contains(n.Substring(2)))
+                            rOrphans.Add((e.FullName, (e.Attributes & FileAttributes.Directory) != 0));
+                    }
+                }
+                catch { }
+                foreach (var (path, isDir) in rOrphans)
+                {
+                    try { total += isDir ? DiskUtils.DirSize(path) : new FileInfo(path).Length; } catch { }
+                }
+            }
             return total;
         }
 

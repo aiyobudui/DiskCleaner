@@ -3,6 +3,7 @@
 [![.NET](https://img.shields.io/badge/.NET-8.0-blue.svg)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4.svg)](https://www.microsoft.com/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/Version-0.9.3-blue.svg)](#)
 
 一款面向 Windows 10 / 11 的系统清理与优化工具，采用 WPF + MVVM 架构，全部功能调用 **Windows 原生 API** 实现，不依赖 WMI，启动快、体积小。
 
@@ -15,14 +16,14 @@
 ### 1. 仪表盘
 
 - **系统信息**：系统版本 / CPU / 内存 / 显卡信息
-- **性能监控**：CPU / 内存 / GPU 实时占用（原生 API 高速采样），支持一键释放系统内存
+- **性能监控**：CPU / 内存 / GPU 实时占用（原生 API 高速采样），支持一键整理系统内存
 - **磁盘空间**：各磁盘分区容量与可用空间卡片，双击可打开分区
 
 ### 2. 深度清理
 
 深度清理页包含 **垃圾清理**、**极限清理**、**空文件夹扫描** 三大块。
 
-#### 垃圾清理（树形分组，50+ 清理项）
+#### 垃圾清理（树形分组，100+ 清理项）
 
 每项标注 **安全 / 谨慎** 风险等级，默认仅勾选安全级；扫描采用并行调度（并发度 4），结果按"是否有内容"自动过滤，0B 项隐藏不显示。
 
@@ -30,7 +31,7 @@
 - 系统临时文件、用户临时文件（`%temp%`）、预读取（Prefetch）、内存转储（`MEMORY.DMP`）
 - Windows 错误报告（WER）、Windows 日志（`Logs\CBS` 等）、Minidump 崩溃转储
 - 缩略图缓存（`thumbcache_*.db` / `iconcache_*.db`）、图标缓存（`IconCache.db`）
-- Internet 临时文件（INetCache）、DirectX 着色器缓存、Windows 小组件缓存
+- Internet 临时文件（INetCache）、显卡着色器缓存（D3DSCache + NVIDIA DXCache/GLCache + AMD DxcCache/DxCache/VkCache/OglCache，删除后游戏首次加载自动重建）、Windows 小组件缓存
 - 传递优化文件（`SoftwareDistribution\Download`）、Windows Store 缓存
 - Windows 升级临时文件（`$WINDOWS.~BT` / `~WS` / `~Q`，谨慎级，10 天内删除将无法回滚；**清理前先检测系统是否正在升级/维护，升级中自动跳过**）
 - 设备驱动程序包（仅删未被任何设备引用的孤立 OEM 驱动包；**清理前同样检测系统是否正在升级，升级中自动跳过**）
@@ -38,11 +39,11 @@
 
 **应用清理**
 - **浏览器**：Edge / Chrome / Firefox / Brave / Opera / 360 / 搜狗 / QQ浏览器 / Vivaldi / 夸克 — 全部支持**多 Profile** 扫描（`Default` / `Profile 1..N` / `Guest Profile`），仅清 `Cache` / `Code Cache`，**不触碰** Cookies / 登录凭据 / 书签
-- **即时通讯**：微信（仅 `FileStorage\Cache`）/ QQ（`RichMedia` 缩略图 + QQ NT `Cache\Cache_Data` 等 Chromium 缓存）/ 企业微信（仅 `Cache`）/ 网易邮箱大师 — **绝不清理**聊天记录、聊天图片视频、接收文件
+- **即时通讯**：微信（仅 `FileStorage\Cache`）/ QQ（`RichMedia` 缩略图 + QQ NT 缓存：`Cache\Cache_Data` 等 Chromium 缓存 + `nt_data` 聊天媒体缓存 Pic/Emoji/Video/avatar，**绝不触碰** `nt_db` 聊天记录库）/ 企业微信（仅 `Cache`）/ 网易邮箱大师 — **绝不清理**聊天记录、聊天图片视频、接收文件
 - **音乐**：网易云音乐 / QQ音乐 / 酷狗 / 酷我 — 仅清 `Cache`，**不触碰**已下载歌曲
 - **视频**：腾讯视频 / 优酷 / 爱奇艺 — 仅清 `Cache`，**不触碰**已下载视频
 - **网盘/下载**：迅雷（仅 `Cache` + `XLLiveUD`，**保留** `Torrents` 种子收藏）、Spotify（仅 `cache` + `Storage`，**保留** `Data` 离线音乐）、腾讯会议（仅 `Cache` + `AppCache`，**保留** `Recording` 录制视频）
-- **办公游戏**：WPS Office（仅 `cache`，**保留** `backup` 文档备份）、Epic Games Launcher
+- **办公游戏**：WPS Office（仅 `cache`，**保留** `backup` 文档备份）、Epic Games Launcher、暴雪战网 Battle.net（Overlay 网页缓存 `webview_cache_*` + Electron 缓存，均为纯缓存按需重建，清理前建议先关闭战网）
 - **开发工具**：VSCode / JetBrains 系列 / Visual Studio / Android Studio / npm / pip / Maven / Gradle / NuGet — 仅清缓存，**保留** config / projects / plugins / workspaceStorage
 - **其他**：钉钉 / 剪映 / Telegram（扩展名白名单：`.cache` / `.blob` / `.bin`）/ Adobe（扩展名白名单：`.pek` / `.cfa` / `.ims`，**保留** `.mcdb` 索引数据库）
 
@@ -73,6 +74,7 @@
 
 **回收站**
 - 清理完成后可选清空回收站（默认不勾选，由用户手动决定）
+- **孤儿回收站检测**：扫描各盘 `$RECYCLE.BIN` 中索引已丢失/损坏的孤儿数据（`$R` 无对应 `$I` 索引），这类数据系统界面与“清空回收站”命令都看不见也删不掉，但真实占用磁盘且永远无法通过回收站恢复——删除不损失可恢复性
 
 **安全设计**
 - **直接删除**：所有文件删除直接删除（不再移入回收站）
@@ -80,6 +82,7 @@
 - **系统属性保护**：带 `System` 属性的文件/目录跳过
 - **注册表严格判定**：WOW64 互查、未加引号路径解析，避免误判已安装软件
 - **空文件夹清理**：只删真正为空的目录，跳过重解析点和系统目录，非递归删除
+- **系统权限文件兜底**：普通删除/截断失败的系统保护文件（如仅 SYSTEM 可删的系统日志）自动尝试 `takeown` + `icacls` 夺取所有权后删除；仍被占用则走“重启后删除”
 
 #### 极限清理（系统工具）
 
@@ -103,7 +106,8 @@
 - **文件右键管理** / **桌面右键管理** / **新建菜单管理** 三个分类
 - **显示系统项开关**：默认关闭（过滤系统项），勾选后显示全部项（含系统项）
 - 扫描注册表 shell 动词、Shell 扩展、新建菜单，提取程序图标
-- 支持禁用/启用/删除右键菜单项
+- 支持禁用/启用/删除右键菜单项（删除前自动备份，可跨会话撤销恢复）
+- **中文名映射**：内置 120+ 项 CLSID/动词中文映射 + 动态解析链（注册表 LocalizedString → DLL 产品名 → DLL 文件名兜底），未识别项不再显示裸 GUID
 
 ### 4. 系统设置
 
@@ -112,8 +116,8 @@
 - **任务栏与开始菜单**：任务栏按钮合并方式、开始菜单居中
 - **桌面图标**：控制「此电脑 / 回收站 / 网络 / 控制面板 / 用户文件夹」是否在桌面显示
 - **文件资源管理器**：显示隐藏文件、显示文件扩展名、显示受保护的系统文件等
-- **记事本设置**：面向新记事本（Win11 多标签页）——打开文件方式（新选项卡 / 新窗口）、启动方式（新会话 / 继续上一个会话）
-- **用户文件夹迁移**：将桌面 / 文档 / 下载 / 图片 / 音乐 / 视频重定向到新位置（`robocopy /E /MOVE` + `SHSetKnownFolderPath`），释放 C 盘空间
+- **记事本设置**：面向新记事本（Win11 多标签页）——打开文件方式（新选项卡 / 新窗口）、启动方式（新会话 / 继续上一个会话）；应用设置时不再强杀运行中的记事本（避免丢失未保存内容），有实例则仅改注册表下次生效
+- **用户文件夹迁移**：将桌面 / 文档 / 下载 / 图片 / 音乐 / 视频重定向到新位置（`robocopy` 两阶段迁移：先纯复制不删源、验证成功再移除源、失败自动回滚 + `SHSetKnownFolderPath` 系统级重定向 + 迁移后自验证源目录残留），释放 C 盘或重装系统后文件不丢失
 - **HOSTS 文件**：内置编辑 `C:\Windows\System32\drivers\etc\hosts`，支持备份与还原
 
 ---
@@ -124,6 +128,7 @@
 - **并行扫描**：垃圾清理扫描采用 `SemaphoreSlim` 限制并发度 4，避免磁盘 I/O 争抢，总耗时 ≈ 最慢项的扫描时间。
 - **直接删除**：垃圾清理一律直接删除（不再移入回收站）；谨慎级项目默认不勾选并需二次确认，降低误删风险。
 - **实时反馈**：系统优化命令通过 `IProgress<string>` 逐行回流到 UI 日志。
+- **删除四级降级链**：直接删除 → 截断 → `takeown`+`icacls` 夺取所有权 → 重启后删除，系统权限保护文件也能清理。
 - **MVVM 分层架构**：职责清晰，代码模块化。
 
 ### 项目结构
@@ -137,7 +142,7 @@ DiskCleaner/
 ├── Directory.Build.props             # 共享编译属性（版本号、发布配置）
 ├── app.manifest                      # 应用清单
 ├── build.bat                         # 一键发布脚本（依赖框架单文件）
-├── ContextMenuMapping.cs             # 右键管理中文名映射（CLSID/动词/系统项静态字典 + 统一查询接口）
+├── ContextMenuMapping.cs             # 右键管理中文名映射（CLSID/动词/系统项静态字典 + 统一查询接口 + 进程级缓存）
 ├── .gitignore
 │
 ├── Behaviors/                        # 附加行为（DiskCleaner.Behaviors）
@@ -181,7 +186,7 @@ DiskCleaner/
 │   ├── MainViewModel.cs              #   主窗口核心逻辑与导航
 │   ├── MainViewModel.Dashboard.cs    #   仪表盘 / 系统监控
 │   ├── MainViewModel.ContextMenu.cs  #   右键菜单管理（扫描 / 图标提取 / 系统项开关）
-│   ├── MainViewModel.DeepClean.cs    #   深度清理（50+ 清理项 + 并行扫描 + 注册表清理）
+│   ├── MainViewModel.DeepClean.cs    #   深度清理（100+ 清理项 + 并行扫描 + 注册表清理）
 │   ├── MainViewModel.SystemSettings.cs       # 系统设置页
 │   └── MainViewModel.SoftwareSettings.cs     # 软件设置页
 │

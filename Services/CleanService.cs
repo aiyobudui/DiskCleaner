@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.ServiceProcess;
@@ -160,6 +161,15 @@ namespace DiskCleaner.Services
                 return;
             }
 
+            // 系统权限保护文件的兜底删除：直接删 / 截断都失败（如仅 SYSTEM 可删的系统日志）时，
+            // 尝试 takeown 夺取所有权 + icacls 授予管理员权限后再删除。
+            if (TryDeleteFileWithTakeOwnership(file, logger))
+            {
+                progress?.Report(file);
+                result = result with { FilesSucceeded = result.FilesSucceeded + 1, BytesFreed = result.BytesFreed + fileSize };
+                return;
+            }
+
             
             if (TryScheduleDeleteOnReboot(file, logger))
             {
@@ -261,10 +271,57 @@ namespace DiskCleaner.Services
             return false;
         }
 
-        
-        
-        
-        
+        // 系统保护文件（ACL 仅授权 SYSTEM 等账户）的兜底删除：
+        // 用 takeown 夺取文件所有权 + icacls 授予当前管理员组完全控制，再重试删除。
+        // 只处理“直接删/截断都失败”的文件，且保持重解析点 / WindowsApps 护栏不变；
+        // 文件若同时被占用，takeown 后删除仍会失败并继续走“重启后删除”。
+        private static bool TryDeleteFileWithTakeOwnership(string file, ILogger logger)
+        {
+            try
+            {
+                if (DiskUtils.IsReparsePoint(file)) return false;   // 重解析点不参与
+                if (IsWindowsAppsPath(file)) return false;
+                if (!File.Exists(file)) return true;
+
+                // 1) 夺取所有权（takeown 需要管理员权限；本程序以管理员身份运行）
+                RunTool("takeown.exe", $"/f \"{file}\"");
+                // 2) 授予 Administrators 组（SID S-1-5-32-544）完全控制，覆盖原 ACL 的拒绝
+                RunTool("icacls.exe", $"\"{file}\" /grant *S-1-5-32-544:F");
+                // 3) 清除只读后重试删除
+                var attr = File.GetAttributes(file);
+                if ((attr & FileAttributes.ReadOnly) == FileAttributes.ReadOnly)
+                    File.SetAttributes(file, attr & ~FileAttributes.ReadOnly);
+                File.Delete(file);
+                logger?.Info($"文件受系统权限保护，已通过夺取所有权后删除: {file}");
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // 执行外部命令行工具（takeown / icacls），隐藏窗口，超时 15 秒，返回是否成功。
+        private static bool RunTool(string exe, string args)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo(exe, args)
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using var p = Process.Start(psi);
+                if (p == null) return false;
+                if (!p.WaitForExit(15000)) { try { p.Kill(); } catch { } return false; }
+                return p.ExitCode == 0;
+            }
+            catch { return false; }
+        }
+
         
         private static bool IsReparsePoint(string path) => DiskUtils.IsReparsePoint(path);
 
